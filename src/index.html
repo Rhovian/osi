@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSI: how a web request travels</title>
+<meta name="description" content="Follow one web request through the seven OSI layers, from a laptop to a server and back, with the real bytes at every step.">
+<style>
+  :root{--paper:#f2efe7;--card:#fbf9f3;--ink:#231e16;--muted:#7a7263;--rule:#ddd6c8}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:760px;margin:0 auto;padding:56px 20px 40px}
+  h1{font:800 15px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em;margin:0 0 14px}
+  .lead{font-size:24px;line-height:1.35;margin:0 0 30px;max-width:30em}
+  .bands{display:flex;gap:5px;margin:0 0 34px}
+  .bands span{flex:1;height:10px;border:1.5px solid var(--ink);border-radius:4px}
+  a.card{display:block;text-decoration:none;color:inherit;background:var(--card);border:1.5px solid var(--ink);border-radius:14px;padding:20px 22px;margin:0 0 14px;box-shadow:0 3px 0 var(--ink);transition:transform .1s,box-shadow .1s}
+  a.card:hover{transform:translateY(-2px);box-shadow:0 5px 0 var(--ink)}
+  a.card:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+  .k{font:700 11.5px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+  h2{font-size:24px;margin:4px 0 6px}
+  a.card p{margin:0;color:#4b4438}
+  .go{display:inline-block;margin-top:12px;font:700 14px ui-monospace,Menlo,Consolas,monospace}
+  footer{margin-top:34px;font-size:13.5px;color:var(--muted)}
+  footer a{color:inherit}
+</style></head>
+<body><main>
+  <h1>OSI · HOW A WEB REQUEST TRAVELS</h1>
+  <p class="lead">Follow one web request through the seven layers of a network, from a laptop to a server and back, with the real bytes at every step.</p>
+  <div class="bands" aria-hidden="true">
+    <span style="background:#ef6a4c"></span><span style="background:#f5a04a"></span><span style="background:#f2c94c"></span><span style="background:#8fd0a6"></span><span style="background:#6cc3cf"></span><span style="background:#7c9fe2"></span><span style="background:#b39ad8"></span>
+  </div>
+  <a class="card" href="journey.html">
+    <div class="k">Start here · about 15 minutes</div>
+    <h2>The Network Journey</h2>
+    <p>Twenty stops, one step at a time: down the laptop's layers, across a cable, a switch and a router, up the server, and back again as the reply. Each stop has the real bytes and something to try.</p>
+    <span class="go">Begin the journey &rarr;</span>
+  </a>
+  <a class="card" href="osi.html">
+    <div class="k">Playground</div>
+    <h2>The OSI machine</h2>
+    <p>The whole model on one desk: two seven-storey towers you can turn round and look inside. Send a message, then break it on purpose: unplug the cable, corrupt bits, drop a segment.</p>
+    <span class="go">Open the machine &rarr;</span>
+  </a>
+  <footer>Works offline: every page is a single file. 3D by <a href="https://threejs.org">three.js</a>; the OSI machine is built with <a href="https://april-zhu.com/colorfigures">Colorfigures</a>.</footer>
+</main></body></html>

@@ -115,3 +115,18 @@ router changes the TTL from 64 to 63), the Ethernet FCS (CRC-32), and the new MA
 
 Single file, works offline: `src/journey.html` (stops are plain data in `CONTENT`) + three.js r158 (MIT,
 `src/vendor/`). Rebuild with `python3 src/inline.py src/journey.html journey.html`.
+
+## Deploying
+
+The site is static: `python3 scripts/build_site.py` builds `dist/` (a landing page, `journey.html`, `osi.html`) using
+only Python 3. Each host below runs that command from its config file; there is nothing else to install.
+
+- **Netlify:** Add new site > Import an existing project > pick this repo. `netlify.toml` sets the build command and the
+  `dist` folder.
+- **Vercel:** Add New > Project > import this repo. `vercel.json` sets the build command, the `dist` folder and clean
+  URLs (`/journey`, `/osi`).
+- **GitHub Pages:** Settings > Pages > Source: GitHub Actions. `.github/workflows/pages.yml` deploys on every push to
+  `main` (or run it by hand from the Actions tab).
+- **Cloudflare Pages** or any other static host: build command `python3 scripts/build_site.py`, output directory `dist`.
+
+Netlify and Vercel also build a preview for every branch and pull request.
