@@ -53,3 +53,30 @@ PHY transceiver + twisted pairs (L1).
 - `osi.html` opens standalone in a browser, no external requests.
 - Verified from all sides with headless Chrome per the skill's *Verify* section.
 - Short note in this readme listing what each button does.
+
+## Buttons (what each one does)
+
+Open `osi.html` in a browser (single file, no network). Source: `src/osi.html` + `src/core.js`; rebuild with
+`python3 .claude/skills/colorfigures/scripts/build.py src/osi.html osi.html`.
+
+- **Send** — the letter (GET /) rides the Sender's lift down L7→L1; each floor adds its header block in its own colour
+  (TLS → session tag → TCP/UDP → IP → MAC + FCS), then it leaves as blinking bits on the cable, through the switch
+  (reads MAC) and router (strips the frame, keeps the IP packet, builds a new frame: SRC MAC changes aa:01 → cc:07),
+  and climbs the Receiver's lift L1→L7 with each floor removing its own block. With TCP a green ACK runs back and the
+  sender's L4 lamp lights. The top-right panel shows the current PDU, SRC MAC and DST IP.
+- **Step** — same journey one layer/hop at a time, with a one-line note per step. Press Send to finish at full speed.
+- **Unplug cable** — the plug lies loose on the board, the link LED goes dark; the frame stops at L1 (✗).
+- **Corrupt bits** — noise flips a bit on the last cable (red pulse); the receiver's L2 FCS check fails and the frame
+  is dropped (✗). TCP times out and retransmits; UDP leaves it lost.
+- **Wrong IP** — destination becomes 10.9.9.9; the router has no route, its screen says so, and a red ICMP
+  "unreachable" travels back to the sender's L3.
+- **Drop a segment** — the router's queue is full and drops it. TCP: the sender's L4 timer runs out (amber), it
+  retransmits and gets an ACK. UDP: just lost.
+- **Use UDP** — toggles TCP/UDP: smaller L4 header block, no sequence numbers, no ACK, no retransmits.
+- **Bad certificate** — at the receiver's L6 the padlock springs open (see-through) and the request is refused (✗).
+- **See-through** — the tower cases fade; each floor's parts show and light up while working: browser (L7), cipher
+  wheel + padlock (L6), handshake sliders (L5), sequence counter, retransmit timer and ACK tube (L4), routing table +
+  IP stamp (L3), MAC table + MAC/FCS chips (L2), PHY transceiver, magnetics, RJ45 and twisted pairs (L1); plus the
+  switch ASIC/MAC table and router CPU/routing table. **Labels** names them.
+- Fault toggles stay on (button shown dark) until pressed again. Hover a floor for a tooltip (layer, PDU, protocols,
+  real devices). Drag to turn the board all the way round; pinch / ctrl-scroll to zoom.
