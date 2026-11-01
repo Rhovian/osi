@@ -6,7 +6,7 @@
 dist/index.html                    The Network Journey (src/index.html)
 dist/assets/three-<hash>.min.js    three.js, named by its content so it can be cached for a year
 
-Used by Netlify (netlify.toml), Vercel (vercel.json) and GitHub Pages (.github/workflows/pages.yml).
+Netlify runs this on every deploy (netlify.toml).
 """
 import hashlib, os, re, shutil
 

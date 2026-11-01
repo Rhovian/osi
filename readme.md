@@ -6,6 +6,8 @@ Follow one web request (`GET /` from a laptop at 10.0.0.20 to `wiki.lan` at 10.0
 OSI model: down the laptop, across a cable, a switch, a router and a second cable, up the server, and back again as the
 reply. Twenty stops, one step at a time, with the real bytes at every step.
 
+**Live: [osi-flow.netlify.app](https://osi-flow.netlify.app/)**
+
 ## Using it
 
 One control: **Next / Back** (or the arrow keys, or click a stop on the route map at the bottom). Drag the picture to
@@ -45,16 +47,12 @@ To build what gets deployed: `python3 scripts/build_site.py` writes `dist/index.
 
 ## Deploying
 
-The site is static and the build needs only Python 3. Each host runs it from its config file:
-
-- **Netlify:** Add new site > Import an existing project > pick this repo (`netlify.toml`).
-- **Vercel:** Add New > Project > import this repo (`vercel.json`).
-- **GitHub Pages:** Settings > Pages > Source: GitHub Actions. `.github/workflows/pages.yml` deploys every push to
-  `main`.
-- **Cloudflare Pages** or any other static host: build command `python3 scripts/build_site.py`, output directory `dist`.
+The site is hosted on Netlify at [osi-flow.netlify.app](https://osi-flow.netlify.app/). `netlify.toml` tells Netlify to
+run `python3 scripts/build_site.py` (Python 3 only, nothing to install) and publish `dist/`. Netlify builds a deploy
+for every push, and a preview for every branch and pull request.
 
 Load time: the page is about 40 KB and three.js about 120 KB after compression. three.js is trimmed to only the parts
-the page uses, and its file name carries a content hash, so Netlify and Vercel tell browsers to cache it for a year.
+the page uses, and its file name carries a content hash, so Netlify tells browsers to cache it for a year.
 A loader shows only if loading takes longer than a moment.
 
 ## Project layout
