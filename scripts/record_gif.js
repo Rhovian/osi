@@ -24,6 +24,6 @@ const ROOT = path.join(__dirname, '..'), file = path.join(ROOT, 'dist', 'index.h
   if (errs.length) throw new Error(errs.join(' | '));
   const gif = path.join(ROOT, 'docs', 'journey.gif'); fs.mkdirSync(path.dirname(gif), { recursive:true });
   execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-framerate', '12', '-i', path.join(out, 'f%04d.png'), '-filter_complex',
-    'scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle', '-loop', '0', gif]);
+    'scale=680:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle', '-loop', '0', gif]);
   fs.rmSync(out, { recursive:true, force:true });
   console.log(`wrote ${path.relative(ROOT, gif)} from ${n} frames (${(fs.statSync(gif).size/1048576).toFixed(1)} MB)`); })();
