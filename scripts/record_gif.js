@@ -3,7 +3,7 @@
 // Needs Node with Playwright (and its Chromium) and ffmpeg on the PATH.
 const { chromium } = require('playwright');
 const fs = require('fs'), os = require('os'), path = require('path'), { execFileSync } = require('child_process');
-const ROOT = path.join(__dirname, '..'), file = path.join(ROOT, 'dist', 'journey.html'), out = fs.mkdtempSync(path.join(os.tmpdir(), 'journey-frames-'));
+const ROOT = path.join(__dirname, '..'), file = path.join(ROOT, 'dist', 'index.html'), out = fs.mkdtempSync(path.join(os.tmpdir(), 'journey-frames-'));
 (async () => {
   const b = await chromium.launch({ args:['--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
   const p = await b.newPage({ viewport:{ width:1040, height:650 }, deviceScaleFactor:1 });
@@ -11,7 +11,7 @@ const ROOT = path.join(__dirname, '..'), file = path.join(ROOT, 'dist', 'journey
     window.__vt = ms => { t += ms; const cbs = q; q = []; cbs.forEach(cb => cb(t)); }; });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.goto('file://' + file);
-  await p.addStyleTag({ content:'.app{grid-template-columns:minmax(0,1fr)!important}#panel{display:none!important}header,#rail{grid-column:1!important}' });
+  await p.addStyleTag({ content:'.app{grid-template-columns:minmax(0,1fr)!important}#panel{display:none!important}#loader{display:none!important}header,#rail{grid-column:1!important}' });
   await p.evaluate(() => window.dispatchEvent(new Event('resize')));
   await p.waitForTimeout(400); await p.evaluate(() => window.__vt(16));
   let n = 0;
