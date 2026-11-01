@@ -81,15 +81,33 @@ Open `osi.html` in a browser (single file, no network). Source: `src/osi.html` +
 - Fault toggles stay on (button shown dark) until pressed again. Hover a floor for a tooltip (layer, PDU, protocols,
   real devices). Drag to turn the board all the way round; pinch / ctrl-scroll to zoom.
 
-## The Network Journey (`journey.html`) — work in progress
+## The Network Journey (`journey.html`)
 
 A step-by-step journey that follows one request (`GET /` from a laptop at 10.0.0.20 to `wiki.lan` at 10.0.1.7) down
-the laptop's seven layers, across a cable, switch and router, and up the server's layers. One control: Next / Back
-(arrow keys, or click a stop on the route map). Each stop shows a plain-language summary, the steps that happen, the
-real bytes at that point (click a header block, point at a field to find it in the hex), who does the work in real
-systems, and one "Try it" (edit the path, peek at the ciphertext, replay the TLS handshake, switch TCP/UDP).
+the laptop's seven layers, across a cable, a switch, a router and a second cable, and up the server's seven layers
+(18 stops). One control: Next / Back (arrow keys, or click a stop on the route map). Each stop shows a plain-language
+summary, the steps that happen, the real bytes at that point (click a header block, point at a field to find it in
+the hex), who does the work in real systems, and one "Try it":
 
-Built so far: Start, Laptop L7–L4. Next: L3–L1, the network (cable, switch, router), and the server's way up.
+| Stop | Try it |
+|---|---|
+| Laptop 7 Application | edit the path; byte counts and checksums change all the way through |
+| Laptop 6 Presentation | peek at the decrypted bytes, encrypt again |
+| Laptop 5 Session | replay the TLS handshake |
+| Laptop 4 Transport | switch TCP / UDP (carries through the rest of the trip) |
+| Laptop 3 Network | pick a destination: local delivery or the default gateway |
+| Laptop 2 Data link | clear the ARP cache and ask again |
+| Laptop 1 Physical | unplug the cable |
+| Cable | add a burst of noise (a flipped bit) |
+| Switch | forget the MAC table (flooding) |
+| Router | pick a destination: which routing-table row wins |
+| Server 2 Data link | flip one bit: the recomputed CRC-32 no longer matches the FCS |
+| Server 4 Transport | lose the segment: TCP retransmits, UDP doesn't |
+| Server 6 Presentation | tamper with one byte: TLS tag check fails |
+| Server 7 Application | start again |
+
+All bytes are computed: the TLS record lengths, the TCP/UDP checksum, the IP header checksum (recomputed when the
+router changes the TTL from 64 to 63), the Ethernet FCS (CRC-32), and the new MAC addresses on the second hop.
 
 Single file, works offline: `src/journey.html` (stops are plain data in `CONTENT`) + three.js r158 (MIT,
 `src/vendor/`). Rebuild with `python3 src/inline.py src/journey.html journey.html`.

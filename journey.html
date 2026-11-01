@@ -31,8 +31,8 @@
   h3 .n{color:var(--ink)}
   .steps{margin:0;padding-left:22px}
   .steps li{margin:0 0 6px}
-  .pdu{display:flex;gap:4px;margin:4px 0 6px}
-  .blk{all:unset;cursor:pointer;flex:1 1 0;min-width:0;border:1.5px solid var(--ink);border-radius:7px;padding:5px 6px;background:var(--c);text-align:center;
+  .pdu{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px}
+  .blk{all:unset;cursor:pointer;flex:1 1 0;min-width:62px;border:1.5px solid var(--ink);border-radius:7px;padding:5px 6px;background:var(--c);text-align:center;
     box-shadow:0 2px 0 var(--ink);transition:transform .1s}
   .blk b{display:block;font:800 11.5px ui-monospace,Menlo,monospace;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .blk small{display:block;font:600 11px ui-monospace,Menlo,monospace;opacity:.8}
@@ -84,6 +84,18 @@
   #rail .dot{cursor:pointer}
   #rail .dot.off{cursor:default}
   #rail text{font:700 10px ui-monospace,Menlo,monospace;pointer-events:none}
+  .blk.gone{opacity:.5;border-style:dashed;box-shadow:none}
+  .blk.gone small::after{content:" off"}
+  .wave{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--rule);border-radius:8px}
+  table.cmp{width:100%;border-collapse:collapse;font-size:13px;background:#fff;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+  table.cmp th,table.cmp td{padding:5px 7px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+  table.cmp th{font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#f7f4ec}
+  table.cmp td code{font-size:12px}
+  table.cmp tr.on td{background:#fff1bf}
+  table.cmp td.chg{background:#ffe2d6}
+  .out{margin-top:8px;font-size:13.5px;background:#fff;border:1px solid var(--rule);border-radius:8px;padding:8px 10px}
+  .try select{font:14px ui-monospace,Menlo,monospace;padding:7px 8px;border:1.5px solid var(--ink);border-radius:8px;background:#fff;width:100%}
+  .leaves{font-size:13.5px;margin:6px 0 0}
   @media (max-width:860px){
     .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 40vh minmax(0,1fr) auto}
     header{grid-column:1} header span{display:none}
@@ -115,23 +127,26 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
    One request (GET / from a laptop at 10.0.0.20 to a web server at 10.0.1.7) is followed stop by stop:
    down the laptop's seven layers, across a cable, a switch, a router and another cable, and up the server's layers.
    The page is three parts: MESSAGE (the real bytes at every layer), ROUTE + CONTENT (one plain-data entry per stop),
-   and the engine (a three.js scene the camera flies through, a text panel, and a route map). */
+   and the ENGINE (a three.js scene the camera flies through, a text panel, and a route map). */
 addEventListener('error', e => { document.documentElement.dataset.errors = (document.documentElement.dataset.errors || '') + e.message + ';'; });
 
 /* ================= MESSAGE: the real bytes ================= */
-const NET = { laptop:'10.0.0.20', server:'10.0.1.7', host:'wiki.lan', sport:49152, dport:443 };
-const msg = { path:'/', proto:'tcp', peek:false };
+const NET = { laptop:'10.0.0.20', server:'10.0.1.7', gw:'10.0.0.1', gw2:'10.0.1.1', host:'wiki.lan', sport:49152, dport:443 };
+const MAC = { laptop:'3c:22:fb:00:00:20', rtA:'00:1a:2b:00:00:01', rtB:'00:1a:2b:00:01:01', server:'52:54:00:00:01:07' };
+const msg = { path:'/', proto:'tcp', peek:false, unplug:false };
 const enc = s => [...new TextEncoder().encode(s)];
 const hashStr = s => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
 const prng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) & 255; };
 const u16 = v => [v >> 8 & 255, v & 255], u32 = v => [v >>> 24 & 255, v >>> 16 & 255, v >>> 8 & 255, v & 255];
-const ip4 = s => s.split('.').map(Number);
+const ip4 = s => s.split('.').map(Number), macB = s => s.split(':').map(h => parseInt(h, 16));
 function inetSum(bytes){ let s = 0; for (let i = 0; i < bytes.length; i += 2) s += (bytes[i] << 8) + (bytes[i + 1] || 0); while (s >> 16) s = (s & 0xffff) + (s >> 16); return ~s & 0xffff; }
+const CRC_T = Array.from({ length:256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = b => { let c = 0xffffffff; for (const x of b) c = CRC_T[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
 function model(m){
   const req = `GET ${m.path} HTTP/1.1\r\nHost: ${NET.host}\r\n\r\n`, http = enc(req), rnd = prng(hashStr(m.path + 'k'));
   const ct = Array.from({ length: http.length + 1 }, rnd), tag = Array.from({ length: 16 }, rnd);   // TLS 1.3: request + 1 content-type byte, then a 16-byte AEAD tag
   const recLen = ct.length + tag.length, tlsHdr = [0x17, 3, 3, ...u16(recLen)], record = [...tlsHdr, ...ct, ...tag];
-  const pseudo = len => [...ip4(NET.laptop), ...ip4(NET.server), 0, m.proto === 'tcp' ? 6 : 17, ...u16(len)];
+  const proto = m.proto === 'tcp' ? 6 : 17, pseudo = len => [...ip4(NET.laptop), ...ip4(NET.server), 0, proto, ...u16(len)];
   let l4;
   if (m.proto === 'tcp'){
     const seq = 0x4f2a9b11, ack = 0x1d7e33a3, h0 = [...u16(NET.sport), ...u16(NET.dport), ...u32(seq), ...u32(ack), 0x50, 0x18, ...u16(64240), 0, 0, 0, 0];
@@ -141,9 +156,13 @@ function model(m){
     const len = 8 + record.length, h0 = [...u16(NET.sport), ...u16(NET.dport), ...u16(len), 0, 0], cs = inetSum([...pseudo(len), ...h0, ...record]) || 0xffff;
     l4 = { name:'UDP', len:8, cs, ulen:len, bytes:[...h0.slice(0, 6), ...u16(cs)] };
   }
-  return { req, http, ct, tag, recLen, tlsHdr, record, l4, path:m.path, proto:m.proto };
+  const seg = [...l4.bytes, ...record];
+  const ipHdr = ttl => { const h = [0x45, 0, ...u16(20 + seg.length), 0x1c, 0x46, 0x40, 0, ttl, proto, 0, 0, ...ip4(NET.laptop), ...ip4(NET.server)]; const cs = inetSum(h); h[10] = cs >> 8; h[11] = cs & 255; return h; };
+  const hop = (dst, src, ttl) => { const ip = ipHdr(ttl), eth = [...macB(dst), ...macB(src), 8, 0], body = [...eth, ...ip, ...seg], crc = crc32(body);
+    return { ttl, ip, eth, body, crc, fcs:[crc & 255, crc >>> 8 & 255, crc >>> 16 & 255, crc >>> 24], dst, src, len:body.length + 4 }; };
+  return { req, http, ct, tag, recLen, tlsHdr, record, l4, seg, path:m.path, proto:m.proto, hop:{ A:hop(MAC.rtA, MAC.laptop, 64), B:hop(MAC.server, MAC.rtB, 63) } };
 }
-const hex = b => b.toString(16).padStart(2, '0');
+const hex = b => b.toString(16).padStart(2, '0'), hx = (v, n = 4) => v.toString(16).padStart(n, '0');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
 
 /* ================= ROUTE: every stop on the journey ================= */
@@ -158,6 +177,39 @@ const ROUTE = [
 ];
 const colorOf = st => st.kind === 'intro' ? '#231e16' : LCOL[st.layer] || LCOL[0];
 const kickerOf = st => st.kind === 'intro' ? 'Start here' : st.kind === 'send' ? `Laptop · Layer ${st.layer}` : st.kind === 'recv' ? `Server · Layer ${st.layer}` : 'On the network';
+const hopOf = st => (st.kind === 'send' || st.id === 'cable-1' || st.kind === 'switch') ? 'A' : 'B';
+
+/* small tables and pictures used by several stops */
+const L3DST = [{ ip:NET.server, what:'the server' }, { ip:'10.0.0.33', what:'the office printer' }, { ip:'93.184.215.14', what:'a site on the internet' }];
+const RTDST = [
+  { ip:NET.server, what:'the server', row:1, out:'Matches <code>10.0.1.0/24</code>: out of eth1, straight to the server.' },
+  { ip:'10.0.0.33', what:'the office printer', row:0, out:"Matches <code>10.0.0.0/24</code>: back out of eth0, onto the laptop's own network." },
+  { ip:'93.184.215.14', what:'a site on the internet', row:2, out:'Only the default route <code>0.0.0.0/0</code> matches: out of eth2, to the internet provider at <code>203.0.113.1</code>. Without a default route the router would drop it and send back an ICMP "destination unreachable".' }];
+const ROUTES = [['10.0.0.0/24', 'directly connected', 'eth0'], ['10.0.1.0/24', 'directly connected', 'eth1'], ['0.0.0.0/0', 'via 203.0.113.1', 'eth2']];
+const MACT = [['1', MAC.laptop, 'laptop'], ['2', 'a8:5e:45:31:7c:02', 'printer'], ['3', 'f0:18:98:44:12:9e', 'desk PC'], ['4', MAC.rtA, 'router']];
+let l3sel = 0, rtsel = 0, macForgot = false;
+function l3Decide(d){ const a = ip4(d.ip), net = [a[0], a[1], a[2], 0].join('.'), local = net === '10.0.0.0';
+  return `<code>${d.ip}</code> AND <code>255.255.255.0</code> = <code>${net}</code><br>` + (local
+    ? `Same network as the laptop (<code>10.0.0.0/24</code>): send it <b>straight to that device</b>, using ARP to find its MAC.`
+    : `Not the laptop's network: send it to the <b>default gateway</b>, the router at <code>${NET.gw}</code>.` + (d.ip === NET.server ? ' (This is our journey.)' : ' The router will pass it on toward the internet.')); }
+const routeTable = hi => `<table class="cmp"><tr><th>Destination</th><th>How</th><th>Port</th></tr>${ROUTES.map((r, i) => `<tr class="${i === hi ? 'on' : ''}"><td><code>${r[0]}</code></td><td>${r[1]}</td><td><code>${r[2]}</code></td></tr>`).join('')}</table>`;
+const macTable = () => `<table class="cmp"><tr><th>Port</th><th>MAC address</th><th>Device</th></tr>${(macForgot ? MACT.slice(0, 1) : MACT).map((r, i) => `<tr class="${i === 0 || i === 3 ? 'on' : ''}"><td>${r[0]}</td><td><code>${r[1]}</code></td><td>${r[2]}</td></tr>`).join('')}</table>`
+  + (macForgot ? `<p class="cap">Table cleared. Only the laptop has been learned again; the router's MAC is unknown, so this frame is flooded out of ports 2 to 6. The router's reply will teach the switch "port 4" again.</p>` : `<p class="cap">Highlighted: the row it just learned (the laptop, port 1) and the row it used (the router, port 4).</p>`);
+function hopCompare(M){ const A = M.hop.A, B = M.hop.B;
+  const rows = [['Source MAC', A.src, B.src], ['Destination MAC', A.dst, B.dst], ['Source IP', NET.laptop, NET.laptop], ['Destination IP', NET.server, NET.server],
+    ['TTL', A.ttl, B.ttl], ['IP checksum', '0x' + hx(A.ip[10] << 8 | A.ip[11]), '0x' + hx(B.ip[10] << 8 | B.ip[11])], ['FCS', '0x' + hx(A.crc, 8), '0x' + hx(B.crc, 8)]];
+  return `<table class="cmp"><tr><th></th><th>Laptop to router</th><th>Router to server</th></tr>${rows.map(([k, a, b]) => `<tr><td>${k}</td><td><code>${a}</code></td><td class="${a === b ? '' : 'chg'}"><code>${b}</code></td></tr>`).join('')}</table><p class="cap">Shaded: what the router changed. The addresses that say where the packet is going, the IPs, never change.</p>`; }
+function waveSVG(){ const bytes = [0x55, 0x55, 0xd5, macB(MAC.rtA)[0], macB(MAC.rtA)[1]], bits = [];
+  bytes.forEach(b => { for (let i = 0; i < 8; i++) bits.push(b >> i & 1); });
+  const W = 400, H = 92, step = W/bits.length, lv = [0, 1, 0, -1]; let st = 0, d = `M0 ${46}`, txt = '';
+  bits.forEach((b, i) => { if (b) st = (st + 1) % 4; const y = 46 - lv[st]*22; d += `L${(i*step).toFixed(1)} ${y}L${((i + 1)*step).toFixed(1)} ${y}`;
+    txt += `<text x="${((i + .5)*step).toFixed(1)}" y="86" text-anchor="middle" font-size="8.5" fill="${i >= 16 && i < 24 ? '#c4452f' : '#7a7263'}" font-family="ui-monospace,Menlo,monospace">${b}</text>`; });
+  const lab = (a, b, t) => `<text x="${(a*step + (b - a)*step/2).toFixed(1)}" y="12" text-anchor="middle" font-size="10" font-weight="700" fill="#231e16" font-family="ui-monospace,Menlo,monospace">${t}</text><path d="M${(a*step + 2).toFixed(1)} 17H${(b*step - 2).toFixed(1)}" stroke="#bdb5a3"/>`;
+  return `<svg class="wave" viewBox="0 0 ${W} ${H}">${lab(0, 16, 'preamble (2 of 7 bytes)')}${lab(16, 24, 'start')}${lab(24, 40, 'frame begins')}<path d="M0 46H${W}" stroke="#e4ded0" stroke-dasharray="3 3"/><path d="${d}" fill="none" stroke="#7c5fc4" stroke-width="2.2" stroke-linejoin="round"/>${txt}</svg>`; }
+function recap(M){ const f = M.hop.B.len, tl = 5 + 1 + 16;
+  const rows = [[7, 'HTTP request', M.http.length], [6, 'TLS header, type byte, tag', tl], [5, 'nothing (memory only)', 0], [4, M.l4.name + ' header', M.l4.len], [3, 'IP header', 20], [2, 'Ethernet header + FCS', 18], [1, 'preamble + gap (on the wire)', 20]];
+  return `<h3>The whole trip, in bytes</h3><table class="cmp"><tr><th>Layer</th><th>Added</th><th>Bytes</th></tr>${rows.map(([n, t, b]) => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:3px;border:1px solid #231e16;background:${LCOL[n]}"></span> ${n}</td><td>${t}</td><td><code>${b}</code></td></tr>`).join('')}</table>`
+    + `<p class="cap">To deliver a ${M.http.length}-byte request, a ${f}-byte frame crossed each cable. On a quiet office network the whole trip takes well under a millisecond.</p>`; }
 
 /* ================= CONTENT: one entry per stop (plain data; M is the message model) ================= */
 const CONTENT = {
@@ -170,12 +222,11 @@ const CONTENT = {
       <h3>The seven layers</h3>
       <div class="layers">${[7, 6, 5, 4, 3, 2, 1].map(n => `<div><i style="--c:${LCOL[n]}">${n}</i><b>${LAYER[n]}</b><span>${({ 7:'what the app wants (HTTP)', 6:'encoding and encryption (TLS)', 5:'the ongoing conversation', 4:'which program, in order, nothing lost (TCP)', 3:'addresses across networks (IP)', 2:'to the next box on this wire (Ethernet)', 1:'bits as signals on a cable' })[n]}</span></div>`).join('')}</div>
       <h3>The cast</h3>
-      <ul class="cast"><li>Laptop <code>${NET.laptop}</code></li><li>Switch, joining the laptop's office network</li><li>Router <code>10.0.0.1</code> | <code>10.0.1.1</code>, joining two networks</li><li>Server <code>${NET.server}</code>, called <code>${NET.host}</code></li></ul>
+      <ul class="cast"><li>Laptop <code>${NET.laptop}</code></li><li>Switch, joining the devices in the laptop's office</li><li>Router <code>${NET.gw}</code> | <code>${NET.gw2}</code>, joining two networks</li><li>Server <code>${NET.server}</code>, called <code>${NET.host}</code></li></ul>
       <p class="hint">Press Next, use the arrow keys, or click a stop on the map at the bottom. Drag the picture to look around.</p>`,
   },
   'send-7': {
-    title:'Application',
-    lead:'The browser writes down what it wants, in a language called HTTP.',
+    title:'Application', lead:'The browser writes down what it wants, in a language called HTTP.',
     steps: M => [
       `You open <code>http://${NET.host}${esc(M.path)}</code>. The browser turns that into an HTTP request.`,
       `It is plain text: a method (<code>GET</code>), a path, a version, then headers such as <code>Host</code>.`,
@@ -185,15 +236,14 @@ const CONTENT = {
     note:'Real browsers send about ten more headers (User-Agent, Accept, cookies). We keep two so every byte stays readable.',
     who:'Browsers (Chrome, Firefox, Safari), command-line tools like <code>curl</code>, and every app that talks to a server. On the far end: web servers such as nginx or Apache.',
     tryit: {
-      html: M => `<input id="pathIn" value="${esc(M.path)}" maxlength="40" spellcheck="false" aria-label="Path"><p>Change the path. The request grows or shrinks, and every later layer's byte counts follow.</p>`,
+      html: M => `<input id="pathIn" value="${esc(M.path)}" maxlength="40" spellcheck="false" aria-label="Path"><p>Change the path. The request grows or shrinks, and every later layer's byte counts and checksums follow, all the way to the server.</p>`,
       bind: () => { const el = document.getElementById('pathIn'); el.oninput = () => { let v = el.value.replace(/[^\x21-\x7e]/g, ''); if (!v.startsWith('/')) v = '/' + v; msg.path = v || '/'; refresh(); }; },
     },
-    arrive: () => { typeScreen(); },
+    arrive: () => typeScreen(),
   },
   'send-6': {
-    title:'Presentation',
-    lead:'The request is turned into agreed bytes, then encrypted so only the server can read it.',
-    steps: M => [
+    title:'Presentation', lead:'The request is turned into agreed bytes, then encrypted so only the server can read it.',
+    steps: () => [
       `<b>Encode.</b> The text becomes bytes everyone agrees on (UTF-8): <code>G</code> is <code>0x47</code>, <code>E</code> is <code>0x45</code>, <code>T</code> is <code>0x54</code>.`,
       `<b>Encrypt.</b> TLS scrambles those bytes with a key that only the laptop and the server know (AES-GCM).`,
       `<b>Seal.</b> A 16-byte tag is added at the end, so the server can tell if anything was changed on the way.`,
@@ -203,20 +253,17 @@ const CONTENT = {
     who:'TLS libraries: BoringSSL in Chrome, NSS in Firefox, OpenSSL and rustls on servers.',
     tryit: {
       html: () => `<div class="seg"><button class="btn" id="peek" aria-pressed="${msg.peek}">Peek inside</button><button class="btn" id="reenc">Encrypt again</button></div><p>Peek shows what the scrambled bytes really say. Only the server can do this for real.</p>`,
-      bind: () => { document.getElementById('peek').onclick = () => { msg.peek = !msg.peek; sel = 'data'; refresh(); };
-        document.getElementById('reenc').onclick = () => spinRotors(); },
+      bind: () => { document.getElementById('peek').onclick = () => { msg.peek = !msg.peek; sel = 'data'; refresh(); }; document.getElementById('reenc').onclick = () => spinRotors('s6'); },
     },
-    arrive: () => spinRotors(),
+    arrive: () => spinRotors('s6'),
   },
   'send-5': {
-    title:'Session',
-    lead:'Keeps track of the conversation, so many requests can share one secure connection.',
+    title:'Session', lead:'Keeps track of the conversation, so many requests can share one secure connection.',
     steps: () => [
       `Before any request, the laptop and server did a <b>TLS handshake</b>: they agreed on keys, and the server proved it really is <code>${NET.host}</code>.`,
       `That shared memory (the keys, a record counter, who the other side is) is the <b>session</b>. It lives in both computers, not in the message.`,
       `Every request in this tab reuses it. After a disconnect, a <b>session ticket</b> lets the laptop resume without starting from scratch.`],
-    focus:'tls',
-    unchanged:'No bytes are added here. A session is something both computers remember, not a header that travels.',
+    focus:'tls', unchanged:'No bytes are added here. A session is something both computers remember, not a header that travels.',
     extra: () => `<h3>What both computers remember</h3><div class="flds">${[
         ['Server identity', NET.host, 'Checked against the certificate the server sent, signed by the office certificate authority.'],
         ['Cipher', 'AES-128-GCM', 'The encryption both sides agreed on.'],
@@ -224,19 +271,15 @@ const CONTENT = {
         ['Record number', '0, 1, 2 …', 'Each record gets the next number, mixed into the encryption, so a replayed or reordered record is rejected.'],
         ['Resume ticket', 'valid 7 days', 'Lets a later connection skip most of the handshake.']]
       .map(([f, v, d]) => `<div class="fld"><div class="fh"><i style="--t:#e9e2cc"></i><b>${f}</b><code>${v}</code></div><p>${d}</p></div>`).join('')}</div>
-      <h3>The handshake that started it</h3>
-      <ol class="hs" id="hs">${HS.map(([who, m, d]) => `<li>${who} <code>${m}</code> ${d}</li>`).join('')}</ol>`,
+      <h3>The handshake that started it</h3><ol class="hs" id="hs">${HS.map(([who, m, d]) => `<li>${who} <code>${m}</code> ${d}</li>`).join('')}</ol>`,
     note:'Layer 5 is the fuzziest layer in real networks. Its job is shared by TLS and the application. Older protocols such as NetBIOS and RPC had a true session layer.',
     who:'The TLS library again, plus the browser, which keeps one connection open per site and reuses it.',
-    tryit: {
-      html: () => `<button class="btn" id="replay">Replay the handshake</button><p>Watch the four steps that happened just after the TCP connection opened, before our request.</p>`,
-      bind: () => { document.getElementById('replay').onclick = () => playHandshake(); },
-    },
-    arrive: () => printTicket(),
+    tryit: { html: () => `<button class="btn" id="replay">Replay the handshake</button><p>Watch the four steps that happened just after the TCP connection opened, before our request.</p>`,
+      bind: () => { document.getElementById('replay').onclick = () => playHandshake('s5'); } },
+    arrive: () => { printTicket(); playHandshake('s5'); },
   },
   'send-4': {
-    title:'Transport',
-    lead:'Labels the bytes with port numbers and sequence numbers, and promises to deliver all of them, in order.',
+    title:'Transport', lead:'Labels the bytes with port numbers and sequence numbers, and promises to deliver all of them, in order.',
     steps: M => M.proto === 'tcp' ? [
       `<b>Ports pick the program.</b> Destination <code>443</code> is the server's web program. Source <code>${NET.sport}</code> is a random return address for this connection.`,
       `<b>Sequence numbers count bytes.</b> The receiver uses them to put pieces back in order and to notice a gap.`,
@@ -249,58 +292,268 @@ const CONTENT = {
     extra: M => M.proto === 'tcp' ? `<h3>Opened earlier: the three-way handshake</h3><ol class="hs"><li>laptop <code>SYN</code> "let's talk; my bytes start at a random number"</li><li>server <code>SYN-ACK</code> "agreed; here is my starting number"</li><li>laptop <code>ACK</code> "got it". Only now can TLS, then our request, go.</li></ol>` : '',
     note:'Browsers that use UDP for the web (HTTP/3) run QUIC on top of it, which puts ordering and resending back in, inside the browser.',
     who:'The operating system kernel: the TCP code in Linux, Windows and macOS. Programs reach it through "sockets".',
-    tryit: {
-      html: () => `<div class="seg"><button class="btn" id="tcp" aria-pressed="${msg.proto === 'tcp'}">TCP</button><button class="btn" id="udp" aria-pressed="${msg.proto === 'udp'}">UDP</button></div><p>Switch protocols and compare the headers: 20 bytes of bookkeeping, or 8.</p>`,
-      bind: () => { for (const p of ['tcp', 'udp']) document.getElementById(p).onclick = () => { if (msg.proto === p) return; msg.proto = p; sel = 'l4'; refresh(); stamp(); }; },
-    },
-    arrive: () => stamp(),
+    tryit: { html: () => `<div class="seg"><button class="btn" id="tcp" aria-pressed="${msg.proto === 'tcp'}">TCP</button><button class="btn" id="udp" aria-pressed="${msg.proto === 'udp'}">UDP</button></div><p>Switch protocols and compare the headers: 20 bytes of bookkeeping, or 8. The choice carries through the rest of the journey.</p>`,
+      bind: () => { for (const p of ['tcp', 'udp']) document.getElementById(p).onclick = () => { if (msg.proto === p) return; msg.proto = p; sel = 'l4'; refresh(); stamp('s4'); }; } },
+    arrive: () => stamp('s4'),
+  },
+  'send-3': {
+    title:'Network', lead:'Puts the two IP addresses on the outside, and decides where the packet goes next.',
+    steps: () => [
+      `<b>Address it.</b> An IP header goes in front: from <code>${NET.laptop}</code> to <code>${NET.server}</code>. These two addresses stay the same for the whole trip.`,
+      `<b>Is it local?</b> The laptop's network is <code>10.0.0.0/24</code>: every address starting <code>10.0.0.</code>. The server's starts <code>10.0.1.</code>, so it is somewhere else.`,
+      `<b>Pick the next hop.</b> Anything not local goes to the <b>default gateway</b>, the router at <code>${NET.gw}</code>. The laptop only needs the first step, not the whole route.`,
+      `<b>Set a time to live.</b> TTL starts at 64. Every router takes one off, so a packet stuck in a loop dies instead of circling forever.`],
+    focus:'ip',
+    note:'IPv6 works the same way with longer addresses (128 bits instead of 32) and no header checksum. Most networks today run both.',
+    who:'The operating system kernel: its IP code and routing table. Type <code>ip route</code> (Linux) or <code>route print</code> (Windows) to see yours.',
+    tryit: { html: () => `<select id="dstSel" aria-label="Destination">${L3DST.map((d, i) => `<option value="${i}" ${i === l3sel ? 'selected' : ''}>${d.ip} (${d.what})</option>`).join('')}</select><div class="out" id="l3out"></div><p>Pick a destination and watch the laptop decide: deliver it directly, or hand it to the router.</p>`,
+      bind: () => { const s = document.getElementById('dstSel'), show = () => { l3sel = +s.value; document.getElementById('l3out').innerHTML = l3Decide(L3DST[l3sel]); drawSign('s', l3sel === 1 ? 0 : 1); }; s.onchange = show; show(); } },
+    arrive: () => drawSign('s', l3sel === 1 ? 0 : 1),
+  },
+  'send-2': {
+    title:'Data link', lead:'Wraps the packet in an Ethernet frame addressed to the next box on this wire: the router, not the server.',
+    steps: M => [
+      `<b>Find the router's hardware address.</b> IP addresses are for the whole trip; on one wire, devices find each other by <b>MAC address</b>. ARP asks everyone "who has ${NET.gw}?" and the router answers <code>${MAC.rtA}</code>.`,
+      `<b>Address the frame.</b> A 14-byte header goes in front: destination MAC (the router), source MAC (the laptop's network card), and a type, <code>0x0800</code>, meaning "IPv4 inside".`,
+      `<b>Add a checksum.</b> A 4-byte FCS goes at the end: a CRC-32 of the whole frame. Whoever receives it recalculates it; one wrong bit and the frame is thrown away.`,
+      `The frame is now ${M.hop.A.len} bytes, ready for the wire.`],
+    focus:'eth',
+    extra: () => `<h3>ARP, just before this</h3><ol class="hs" id="arp"><li>laptop to <code>ff:ff:ff:ff:ff:ff</code> (everyone): "Who has ${NET.gw}? Tell ${NET.laptop}."</li><li>router to laptop: "${NET.gw} is at <code>${MAC.rtA}</code>."</li><li>The laptop keeps the answer in its ARP cache for a few minutes.</li></ol>`,
+    note:'Wi-Fi does the same job with a different frame format (802.11). Ethernet is the one on cables.',
+    who:'The network card driver and the card itself; the card usually calculates the FCS in hardware. See your ARP cache with <code>arp -a</code>.',
+    tryit: { html: () => `<button class="btn" id="arpBtn">Clear the ARP cache and ask again</button><p>Before it can send, the laptop has to shout the question to every device on its network.</p>`,
+      bind: () => { document.getElementById('arpBtn').onclick = () => { playList('arp', .8); flashArp(); }; } },
+    arrive: () => crcScreen('s'),
+  },
+  'send-1': {
+    title:'Physical', lead:'Turns the frame into electrical signals on the four twisted pairs of copper inside the cable.',
+    steps: () => [
+      `<b>Wake-up pattern first.</b> 7 bytes of <code>10101010</code> (the preamble) let the receiver lock onto the rhythm, then <code>10101011</code> (start of frame) says "data starts now".`,
+      `<b>Bits become voltages.</b> The network card's PHY chip drives the pairs. At 1 Gb/s it uses all four pairs in both directions at once, with five voltage levels, 125 million times a second on each pair.`,
+      `<b>Lowest bit first.</b> Each byte goes out least significant bit first, which is why <code>0x55</code> appears on the wire as <code>10101010</code>.`,
+      `<b>Twisting cancels noise.</b> Each pair carries the signal and its mirror image. Interference hits both wires alike, and the receiver only looks at the difference.`],
+    focus:'pre',
+    extra: () => `<h3>The first bits on the wire</h3>${waveSVG()}<p class="cap">Illustration: the preamble and start of frame as rising and falling voltage. Real gigabit Ethernet scrambles the bits and spreads them over four pairs, so an oscilloscope would look busier.</p>`,
+    who:'The PHY chip on the network card, the small transformer block ("magnetics") behind the socket, the RJ45 socket and plug, and a Cat 5e or Cat 6 cable up to 100 m long.',
+    tryit: { html: () => `<button class="btn" id="plug" aria-pressed="${msg.unplug}">${msg.unplug ? 'Plug the cable back in' : 'Unplug the cable'}</button><div class="out">${msg.unplug
+        ? 'No signal. The PHY reports "link down", the green light goes out, and the computer says the network cable is unplugged. Every layer above is ready, but layer 1 has nowhere to put the bits.'
+        : 'Link up. When the cable went in, both ends exchanged bursts of pulses and agreed on a speed: 1000 Mb/s, full duplex. Green light: link. Flickering amber: traffic.'}</div>`,
+      bind: () => { document.getElementById('plug').onclick = () => { msg.unplug = !msg.unplug; setPlug(); renderPanel(); }; } },
+  },
+  'cable-1': {
+    title:'Cable', lead:'The signals travel down the copper at about two-thirds of the speed of light.',
+    steps: M => { const w = 8 + M.hop.A.len + 12; return [
+      `<b>On the wire:</b> ${w} byte-times. The 8-byte preamble, the ${M.hop.A.len}-byte frame, then a 12-byte quiet gap before the next frame may start.`,
+      `<b>Quick to send.</b> At 1 Gb/s a bit lasts 1 nanosecond, so pushing all of it out takes ${(w*8/1000).toFixed(2)} microseconds.`,
+      `<b>Quick to arrive.</b> A signal covers about 20 cm per nanosecond in copper. Across a 30 m office cable that is about 150 ns, so around 150 bits are on the cable at any moment.`,
+      `<b>Both directions at once.</b> The switch can talk back on the same pairs at the same time (full duplex), so nothing collides.`]; },
+    focus:'pre',
+    note:'Fibre carries light instead of voltages, and Wi-Fi uses radio, but the frame and everything inside it stay the same. That is the point of layers.',
+    who:'The cable itself: Cat 6 has four twisted pairs, each twisted at a slightly different rate so they do not interfere with each other.',
+    tryit: { html: () => `<button class="btn" id="noise">Add a burst of noise</button><div class="out" id="noiseOut" hidden>A bit flipped on the way (the red pulse). Nobody can tell yet: the switch will recalculate the FCS, see it no longer matches, and silently drop the frame. Later, TCP on the laptop notices that no ACK came back and sends the data again.</div>`,
+      bind: () => { document.getElementById('noise').onclick = () => { document.getElementById('noiseOut').hidden = false; noiseUntil = performance.now() + 3000; }; } },
+  },
+  'switch': {
+    title:'Switch', lead:'Reads only the destination MAC address, and sends the frame out of the one port that leads there.',
+    steps: () => [
+      `<b>Receive it all.</b> The frame arrives on port 1. The switch stores the whole frame and checks the FCS; a damaged frame stops here.`,
+      `<b>Learn.</b> The source MAC <code>${MAC.laptop}</code> came in on port 1, so the switch notes: the laptop lives on port 1.`,
+      `<b>Look up.</b> The destination MAC <code>${MAC.rtA}</code> is in its table on port 4: the router.`,
+      `<b>Forward.</b> Out of port 4 only, every byte unchanged, a few microseconds later. The switch never even looks at the IP addresses.`],
+    focus:'eth',
+    extra: () => `<h3>The MAC address table</h3>${macTable()}`,
+    note:'A frame for an unknown MAC is copied out of every port except the one it came in on (flooding). Entries are forgotten after about five minutes of silence.',
+    who:'A switching chip (ASIC) that does the lookup in hardware for every single frame. Office switches like this one work at layer 2.',
+    tryit: { html: () => `<button class="btn" id="flood">Forget the table</button><p>With no entry for the router, the switch has to flood the frame out of every port.</p>`,
+      bind: () => { document.getElementById('flood').onclick = () => flood(); } },
+    arrive: () => { drawMacTable(); blinkPorts('sw', [0, 3]); },
+  },
+  'router': {
+    title:'Router', lead:'Unwraps the frame, reads the IP destination, and sends the packet on in a brand-new frame.',
+    steps: M => [
+      `<b>Accept.</b> The FCS checks out and the destination MAC is the router's own (<code>${MAC.rtA}</code>, port eth0), so it takes the frame and strips the Ethernet header and FCS.`,
+      `<b>Look up.</b> <code>${NET.server}</code> matches <code>10.0.1.0/24</code> in the routing table: directly connected on eth1. When several rows match, the most specific one wins.`,
+      `<b>Update the packet.</b> TTL goes from 64 to 63. Because the header changed, its checksum is recalculated. Nothing else in the packet is touched.`,
+      `<b>New frame.</b> ARP gives the server's MAC (<code>${MAC.server}</code>). A fresh Ethernet header goes on, from the router's eth1 (<code>${MAC.rtB}</code>) to the server, with a new FCS.`],
+    focus:'eth',
+    extra: M => `<h3>The routing table</h3>${routeTable(RTDST[rtsel].row)}<h3>Before and after the router</h3>${hopCompare(M)}`,
+    note:'At home, your router also rewrites the source IP address (NAT), because private addresses like 10.0.0.20 are not allowed on the public internet. Between two office networks, like here, it does not.',
+    who:'A router: its CPU or forwarding chip holds the routing table. Your home "router" is a router, a switch and a Wi-Fi access point in one box.',
+    tryit: { html: () => `<select id="rtSel" aria-label="Destination">${RTDST.map((d, i) => `<option value="${i}" ${i === rtsel ? 'selected' : ''}>${d.ip} (${d.what})</option>`).join('')}</select><div class="out" id="rtOut"></div><p>Pick a destination to see which row of the routing table wins.</p>`,
+      bind: () => { const s = document.getElementById('rtSel'), show = () => { rtsel = +s.value; document.getElementById('rtOut').innerHTML = RTDST[rtsel].out; document.getElementById('extra').innerHTML = CONTENT.router.extra(model(msg)); drawRouteTable(RTDST[rtsel].row); }; s.onchange = show; show(); } },
+    arrive: () => { drawRouteTable(RTDST[rtsel].row); blinkPorts('rt', [0, 1]); },
+  },
+  'cable-2': {
+    title:'Cable', lead:"Out of the router's other port, across a second network, to the server.",
+    steps: M => [
+      `This cable belongs to a different network, <code>10.0.1.0/24</code>. The frame on it is new; the packet inside is the one the laptop sent.`,
+      `The signals cross it exactly like the first cable: preamble, the ${M.hop.B.len}-byte frame, a gap.`,
+      `On the internet a packet repeats this router-and-cable step at every hop, often 10 to 20 times, getting a new frame each time while its IP addresses ride through unchanged.`],
+    focus:'eth',
+    extra: M => `<h3>What changed, and what did not</h3>${hopCompare(M)}`,
+    who:'Another Cat 6 cable. In a data centre this hop would more likely be fibre.',
+  },
+  'recv-1': {
+    title:'Physical', lead:"The server's network card hears the signals and turns them back into bits.",
+    steps: () => [
+      `<b>Lock on.</b> The PHY recovers the sender's clock from the signal itself; the preamble gives it a steady pattern to lock onto.`,
+      `<b>Find the start.</b> The <code>10101011</code> start-of-frame pattern says the next bit is the first bit of the frame.`,
+      `<b>Bits to bytes.</b> Bits are collected eight at a time, lowest bit first, and handed to the card's layer 2 logic. The preamble is thrown away.`],
+    focus:'pre', note:'Layer 1 has no idea what the bits mean. It only cares that they arrive with the right timing.',
+    who:"The server's network card: PHY chip, magnetics and RJ45 socket, a mirror image of the laptop's.",
+  },
+  'recv-2': {
+    title:'Data link', lead:'Checks that the frame arrived intact and is addressed here, then unwraps it.',
+    steps: M => [
+      `<b>Check the seal.</b> The card recalculates the CRC-32 over the frame: <code>0x${hx(M.hop.B.crc, 8)}</code>. It matches the FCS, so not a single bit changed.`,
+      `<b>Is it for me?</b> Destination MAC <code>${MAC.server}</code> is this card's own address. Frames for other addresses are ignored.`,
+      `<b>Hand it up.</b> The type <code>0x0800</code> says IPv4, so the contents go to the IP code. The Ethernet header and FCS are removed.`],
+    focus:'fcs',
+    who:'The network card does this in hardware for every frame; the operating system only ever sees frames that passed.',
+    tryit: { html: () => `<button class="btn" id="flip">Flip one bit on the way</button><div class="out" id="flipOut" hidden></div>`,
+      bind: () => { document.getElementById('flip').onclick = () => { const M = model(msg), body = M.hop.B.body.slice(); body[40] ^= 0x08; const c = crc32(body), o = document.getElementById('flipOut'); o.hidden = false;
+        o.innerHTML = `The FCS in the frame says <code>0x${hx(M.hop.B.crc, 8)}</code>. Recalculated over the damaged frame: <code>0x${hx(c, 8)}</code>. No match, so the frame is dropped without a word. Nobody is told; TCP on the laptop notices the missing ACK and resends.`; crcScreen('r', false); }; } },
+    arrive: () => crcScreen('r', true),
+  },
+  'recv-3': {
+    title:'Network', lead:'Confirms the packet is for this computer, and passes it to the right protocol.',
+    steps: M => [
+      `<b>Check the header.</b> The header checksum is correct; the router recalculated it when it changed the TTL to ${M.hop.B.ttl}.`,
+      `<b>Is it for me?</b> Destination <code>${NET.server}</code> is this server's address. A computer that is not a router drops packets meant for someone else.`,
+      `<b>Hand it up.</b> Protocol <code>${M.proto === 'tcp' ? 6 : 17}</code> means ${M.l4.name}, so the contents go to the ${M.l4.name} code and the IP header is removed.`],
+    focus:'ip', note:`The source address is still <code>${NET.laptop}</code>, the laptop's, even after the router. That is how the server knows where to send its reply.`,
+    who:"The server's operating system kernel, running the same IP code as the laptop.",
+    arrive: () => drawSign('r', 0),
+  },
+  'recv-4': {
+    title:'Transport', lead:'Finds the program waiting on port 443, checks the order, and says "got it".',
+    steps: M => M.proto === 'tcp' ? [
+      `<b>Find the connection.</b> The four numbers ${NET.laptop}:${NET.sport} and ${NET.server}:443 identify exactly one connection, owned by the web server program.`,
+      `<b>Check the order.</b> Sequence number 1 is the next byte it expected, so nothing is missing.`,
+      `<b>Acknowledge.</b> The server sends back an ACK for byte ${1 + M.record.length}: "I have everything up to here." That ACK makes the whole journey in reverse.`,
+      `<b>Hand it up.</b> The TCP header comes off and the ${M.record.length} bytes join the connection's incoming stream.`] : [
+      `<b>Find the program.</b> Port 443 belongs to the web server, so the datagram goes to it.`,
+      `<b>No checks, no reply.</b> UDP sends no ACK. Had this datagram been lost, nobody at this layer would ever know.`,
+      `The UDP header comes off and the ${M.record.length} bytes go up.`],
+    focus:'l4',
+    who:"The server's kernel TCP code. The web server program then reads the bytes with an ordinary socket read.",
+    tryit: { html: () => `<button class="btn" id="lose">Lose this segment instead</button><ol class="hs" id="lossList" hidden></ol>`,
+      bind: () => { document.getElementById('lose').onclick = () => { const M = model(msg), ol = document.getElementById('lossList'); ol.hidden = false;
+        ol.innerHTML = (M.proto === 'tcp' ? ['The segment never arrives, so the server sends no ACK.', "The laptop's retransmission timer runs out (at least 200 ms on Linux).", 'The laptop sends the same bytes again, with the same sequence number 1.', `They arrive and the server ACKs ${1 + M.record.length}. The program above never noticed.`]
+          : ['The datagram never arrives.', 'Nobody notices at this layer: there is no ACK and no timer.', 'It is up to the program, or QUIC on top, to ask again.']).map(t => `<li>${t}</li>`).join(''); playList('lossList', .9); }; } },
+    arrive: () => stamp('r4'),
+  },
+  'recv-5': {
+    title:'Session', lead:'Matches the bytes to the secure conversation already set up with this laptop.',
+    steps: () => [
+      `This connection finished its TLS handshake moments before, so the server already holds the session: keys and record counters.`,
+      `It picks the laptop-to-server key and expects record number 0 in that direction.`,
+      `As on the way out, the session is memory, not a header.`],
+    focus:'tls', unchanged:'No bytes are removed here. The session tells the next layer which key to use.',
+    who:'The TLS library inside the web server (for nginx, usually OpenSSL).',
+    arrive: () => playHandshake('r5'),
+  },
+  'recv-6': {
+    title:'Presentation', lead:'Checks the seal, decrypts the request, and turns the bytes back into text.',
+    steps: M => [
+      `<b>Read the label.</b> Type 23, application data; ${M.recLen} bytes follow.`,
+      `<b>Check the seal.</b> AES-GCM recomputes the 16-byte tag with the session key and record number. It matches, so nothing was changed or replayed.`,
+      `<b>Decrypt.</b> The ${M.ct.length} scrambled bytes become the ${M.http.length}-byte request plus its content-type byte, which is dropped.`,
+      `<b>Decode.</b> UTF-8 bytes become text again: <code>GET ${esc(M.path)} HTTP/1.1</code>.`],
+    focus:'data', leaves: M => `Leaves as the plain request again: ${M.http.length} bytes.`,
+    who:'The TLS library inside the web server.',
+    tryit: { html: () => `<button class="btn" id="tamper">Tamper with one byte</button><div class="out" id="tamperOut" hidden>The tag no longer matches. The server refuses to decrypt, sends a TLS alert (<code>bad_record_mac</code>) and closes the connection. The browser shows a connection error, never a changed page.</div>`,
+      bind: () => { document.getElementById('tamper').onclick = () => { document.getElementById('tamperOut').hidden = false; lockFail(); }; } },
+    arrive: () => spinRotors('r6'),
+  },
+  'recv-7': {
+    title:'Application', lead:'The web server reads GET / and writes its answer. The journey is complete.',
+    steps: M => [
+      `<b>Parse.</b> nginx reads the method (<code>GET</code>), the path (<code>${esc(M.path)}</code>) and the host (<code>${NET.host}</code>), and finds the page.`,
+      `<b>Answer.</b> It writes a response, <code>HTTP/1.1 200 OK</code> followed by the page, and hands it down its own seven layers.`,
+      `<b>The way back.</b> The reply makes the same journey in reverse: down the server, a new frame at the router, up the laptop, where the browser draws the page.`],
+    focus:'data', extra: M => recap(M),
+    who:'A web server program: nginx, Apache, Caddy, or an application framework.',
+    tryit: { html: () => `<button class="btn" id="again">Start the journey again</button><p>Change the path on floor 7, or switch to UDP on floor 4, and follow the new bytes all the way through.</p>`,
+      bind: () => { document.getElementById('again').onclick = () => go(1); } },
+    arrive: () => serverLog(),
   },
 };
 const HS = [['laptop', 'ClientHello', '"I speak TLS 1.3. Here is my half of a key exchange."'], ['server', 'ServerHello', '"Agreed. Here is my half." Both now compute the same secret keys.'],
             ['server', 'Certificate', `"I really am ${NET.host}," signed by an authority the laptop trusts.`], ['both', 'Finished', 'Each checks that nobody tampered with the conversation so far.']];
 
-/* the message blocks at each stop (header first) */
+/* the message blocks at each stop (header first). On the server's floors, blocks marked gone are removed there. */
+const reqB = M => ({ key:'data', label:'REQUEST', bytes:M.http.length, layer:7, cream:true });
+const l4B = M => ({ key:'l4', label:M.l4.name, bytes:M.l4.len, layer:4 });
+const tlsB = M => [{ key:'tls', label:'TLS', bytes:5, layer:6 }, { key:'data', label:'ENCRYPTED', bytes:M.ct.length, layer:6, enc:true }, { key:'tag', label:'TAG', bytes:16, layer:6 }];
+const ipB = (M, h) => ({ key:'ip', label:'IP', bytes:20, layer:3, sub:`20 B · TTL ${M.hop[h].ttl}` });
+const frameB = (M, h, pre) => [...(pre ? [{ key:'pre', label:'PREAMBLE', bytes:8, layer:1 }] : []), { key:'eth', label:'ETH', bytes:14, layer:2, hop:h }, ipB(M, h), l4B(M), ...tlsB(M), { key:'fcs', label:'FCS', bytes:4, layer:2, hop:h }];
+const GONE = { 1:['pre'], 2:['eth', 'fcs'], 3:['ip'], 4:['l4'], 5:[], 6:['tls', 'tag'], 7:[] };
 function pduFor(st, M){
-  if (st.kind !== 'send') return [];
-  const n = st.layer, out = [];
-  if (n <= 4) out.push({ key:'l4', label:M.l4.name, bytes:M.l4.len, layer:4 });
-  if (n <= 6) out.push({ key:'tls', label:'TLS', bytes:5, layer:6 }, { key:'data', label:'ENCRYPTED', bytes:M.ct.length, layer:6, enc:true }, { key:'tag', label:'TAG', bytes:16, layer:6 });
-  else out.push({ key:'data', label:'REQUEST', bytes:M.http.length, layer:7, cream:true });
-  return out;
+  const n = st.layer;
+  if (st.kind === 'send'){ if (n === 7) return [reqB(M)]; const up = [...(n <= 4 ? [l4B(M)] : []), ...tlsB(M)];
+    return n >= 4 ? up : n === 3 ? [ipB(M, 'A'), ...up] : frameB(M, 'A', n === 1); }
+  if (st.kind === 'wire') return frameB(M, hopOf(st), true);
+  if (st.kind === 'switch' || st.kind === 'router') return frameB(M, hopOf(st), false);
+  if (st.kind === 'recv'){ if (n === 7) return [reqB(M)];
+    const before = Object.entries(GONE).filter(([k]) => +k < n).flatMap(([, v]) => v);
+    return frameB(M, 'B', true).filter(b => !before.includes(b.key)).map(b => GONE[n].includes(b.key) ? { ...b, gone:true } : b); }
+  return [];
 }
+const leaveFor = (st, M) => st.id === 'recv-6' ? [reqB(M)] : pduFor(st, M).filter(b => !b.gone);
 /* what each block holds, field by field */
 function headerOf(key, M, st){
-  if (key === 'data' && st.layer >= 7) return { view:'text', cap:`The whole request: ${M.http.length} bytes of plain text. Point at a field to find it in the bytes.`,
+  const h = M.hop[hopOf(st)];
+  if (key === 'data' && st.layer === 7) return { view:'text', cap:`The whole request: ${M.http.length} bytes of plain text. Point at a field to find it in the bytes.`,
     parts:[['Method', 'GET'], [null, ' '], ['Path', M.path], [null, ' '], ['Version', 'HTTP/1.1'], [null, '\r\n'], ['Host header', 'Host: ' + NET.host], [null, '\r\n'], ['End of headers', '\r\n']],
     fields:[['Method', 'GET', 'What to do. GET means "send me this".'], ['Path', M.path, 'Which page on the site.'], ['Version', 'HTTP/1.1', 'Which version of the HTTP language.'],
             ['Host header', NET.host, 'Which website. One server can host many, so the request names it.'], ['End of headers', 'blank line', 'An empty line ends the request.']] };
   if (key === 'data') return { view:'hex', cap:`${M.ct.length} bytes that look random: the ${M.http.length}-byte request plus one byte saying it is application data, scrambled.`,
-    parts:[['Ciphertext', M.ct]], fields:[['Ciphertext', M.ct.length + ' bytes', 'Only the session key turns this back into the request.']],
-    peek: msg.peek ? M.req : null };
+    parts:[['Ciphertext', M.ct]], fields:[['Ciphertext', M.ct.length + ' bytes', 'Only the session key turns this back into the request.']], peek: msg.peek ? M.req : null };
   if (key === 'tls') return { view:'hex', cap:'5 bytes in front, left unencrypted, so the receiver knows what follows and how much to read.',
     parts:[['Content type', [0x17]], ['Version', [3, 3]], ['Length', u16(M.recLen)]],
     fields:[['Content type', '23 (0x17)', 'Application data. Handshake messages use 22.'], ['Version', '0x0303', 'Always says TLS 1.2, for old equipment on the way. The real version, 1.3, was agreed in the handshake.'],
             ['Length', String(M.recLen), 'Bytes of ciphertext plus tag that follow.']] };
   if (key === 'tag') return { view:'hex', cap:'16 bytes computed from the ciphertext and the secret key.',
-    parts:[['Auth tag', M.tag]], fields:[['Auth tag', '16 bytes', 'If a single bit of the record changes on the way, this no longer matches and the server throws the record away.']] };
+    parts:[['Auth tag', M.tag]], fields:[['Auth tag', '16 bytes', 'If a single bit of the record changes on the way, this no longer matches and the receiver throws the record away.']] };
   if (key === 'l4' && M.proto === 'tcp'){ const b = M.l4.bytes;
     return { view:'hex', cap:'20 bytes of bookkeeping in front of the TLS record.',
       parts:[['Source port', b.slice(0, 2)], ['Destination port', b.slice(2, 4)], ['Sequence number', b.slice(4, 8)], ['Acknowledgment', b.slice(8, 12)], ['Length and flags', b.slice(12, 14)], ['Window', b.slice(14, 16)], ['Checksum', b.slice(16, 18)], ['Urgent pointer', b.slice(18, 20)]],
       fields:[['Source port', String(NET.sport), "The laptop's end of the conversation, picked at random so replies reach the right connection."],
-              ['Destination port', '443', "Which program on the server. 443 means HTTPS."],
+              ['Destination port', '443', 'Which program on the server. 443 means HTTPS.'],
               ['Sequence number', '1 (relative)', `Counts bytes sent: this segment carries bytes 1 to ${M.record.length}. The real counter starts at a random value, here 0x${M.l4.seq.toString(16)}.`],
               ['Acknowledgment', '1 (relative)', 'The next byte the laptop expects from the server. Everything before it has arrived.'],
               ['Length and flags', '20 B · ACK PSH', 'Header length is 5 × 4 bytes. ACK: the acknowledgment number is valid. PSH: hand this to the program now.'],
               ['Window', '64240', 'How many more bytes the laptop can take before the server has to wait (flow control).'],
-              ['Checksum', '0x' + M.l4.cs.toString(16).padStart(4, '0'), 'Catches damage. Computed over this header, the data and both IP addresses.'],
+              ['Checksum', '0x' + hx(M.l4.cs), 'Catches damage. Computed over this header, the data and both IP addresses.'],
               ['Urgent pointer', '0', 'A leftover from the 1980s, unused today.']] }; }
   if (key === 'l4'){ const b = M.l4.bytes;
     return { view:'hex', cap:'8 bytes. That is the whole UDP header.',
       parts:[['Source port', b.slice(0, 2)], ['Destination port', b.slice(2, 4)], ['Length', b.slice(4, 6)], ['Checksum', b.slice(6, 8)]],
       fields:[['Source port', String(NET.sport), "The laptop's end, so the reply can find its way back."], ['Destination port', '443', 'Which program on the server.'],
-              ['Length', String(M.l4.ulen), 'Header plus data, in bytes.'], ['Checksum', '0x' + M.l4.cs.toString(16).padStart(4, '0'), 'Catches damage, like TCP. Nothing else is promised.']] }; }
+              ['Length', String(M.l4.ulen), 'Header plus data, in bytes.'], ['Checksum', '0x' + hx(M.l4.cs), 'Catches damage, like TCP. Nothing else is promised.']] }; }
+  if (key === 'ip'){ const b = h.ip, tot = 20 + M.seg.length;
+    return { view:'hex', cap:`20 bytes: where the packet comes from and where it is going. ${hopOf(st) === 'B' ? 'This is the copy after the router: only the TTL and checksum differ.' : ''}`,
+      parts:[['Version and length', b.slice(0, 1)], ['Service type', b.slice(1, 2)], ['Total length', b.slice(2, 4)], ['Identification', b.slice(4, 6)], ['Flags', b.slice(6, 8)], ['TTL', b.slice(8, 9)], ['Protocol', b.slice(9, 10)], ['Header checksum', b.slice(10, 12)], ['Source address', b.slice(12, 16)], ['Destination address', b.slice(16, 20)]],
+      fields:[['Version and length', '4 · 20 B', 'IPv4, with a header of 5 × 4 bytes.'], ['Service type', '0', 'Priority hints. 0 means ordinary traffic.'], ['Total length', String(tot), 'The whole packet: this header plus everything inside.'],
+              ['Identification', '0x1c46', 'Tags the pieces if a packet ever has to be split up.'], ['Flags', "don't fragment", 'Asks routers not to split it; the sender would rather be told to send smaller packets.'],
+              ['TTL', String(h.ttl), 'Hops left. Every router subtracts 1; at 0 the packet is dropped. The traceroute tool uses exactly this.'],
+              ['Protocol', M.proto === 'tcp' ? '6 (TCP)' : '17 (UDP)', 'What is inside, so the receiver knows who to hand it to.'],
+              ['Header checksum', '0x' + hx(b[10] << 8 | b[11]), 'Covers only this header. Recalculated at every router, because the TTL changes.'],
+              ['Source address', NET.laptop, 'The laptop. Stays the same for the whole trip.'], ['Destination address', NET.server, 'The server. Stays the same for the whole trip.']] }; }
+  if (key === 'eth'){ const b = h.eth, A = hopOf(st) === 'A';
+    return { view:'hex', cap:`14 bytes that only matter on this one cable. ${A ? 'Addressed to the router, the next box, not to the server.' : 'The router wrote this new header for the second cable.'}`,
+      parts:[['Destination MAC', b.slice(0, 6)], ['Source MAC', b.slice(6, 12)], ['EtherType', b.slice(12, 14)]],
+      fields:[['Destination MAC', h.dst, A ? "The router's eth0 port: the next stop, found with ARP." : "The server's network card, found by the router with ARP."],
+              ['Source MAC', h.src, A ? "The laptop's network card. The first 3 bytes identify the maker." : "The router's eth1 port, the side facing the server."],
+              ['EtherType', '0x0800', 'What is inside: IPv4. (0x86DD would be IPv6, 0x0806 ARP.)']] }; }
+  if (key === 'fcs') return { view:'hex', cap:'4 bytes at the very end: the frame check sequence.',
+    parts:[['FCS', h.fcs]], fields:[['FCS', '0x' + hx(h.crc, 8), 'A CRC-32 of the whole frame, sent lowest byte first. The receiver recalculates it; any damaged bit changes it and the frame is dropped.']] };
+  if (key === 'pre') return { view:'hex', cap:'8 bytes sent before every frame. They are not part of the frame and are discarded on arrival.',
+    parts:[['Preamble', [0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55]], ['Start of frame', [0xd5]]],
+    fields:[['Preamble', '7 × 0x55', 'On the wire 10101010 again and again: a steady beat the receiver locks its clock onto.'], ['Start of frame', '0xd5', 'On the wire 10101011. The two 1s at the end say: the frame starts with the next bit.']] };
 }
-const TINTS = ['#ffe08a', '#bfe3ff', '#c9f0cf', '#ffc9c2', '#e3d4ff', '#ffd8a8', '#cdeff0', '#f6c6e6', '#e6e0c8'];
+const TINTS = ['#ffe08a', '#bfe3ff', '#c9f0cf', '#ffc9c2', '#e3d4ff', '#ffd8a8', '#cdeff0', '#f6c6e6', '#e6e0c8', '#d9f2b5'];
 
 /* ================= ENGINE: the 3D world ================= */
 const stage = document.getElementById('stage');
@@ -321,21 +574,23 @@ const mat = c => _mats[c] || (_mats[c] = new THREE.MeshToonMaterial({ color:c, g
 const INKM = new THREE.LineBasicMaterial({ color:0x231e16 });
 const ink = (mesh, a = 28) => { mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, a), INKM)); return mesh; };
 const place = (m, p, x, y, z) => { m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; p.add(m); return m; };
-// a box standing on y (its bottom at y), a cylinder (axis y, x or z) centred at (x, y, z)
-const box = (w, h, d, c, p, x, y, z) => place(ink(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c))), p, x, y + h/2, z);
+// a box standing on y (its bottom at y); a cylinder (axis y, x or z) centred at (x, y, z)
+const box = (w, h, d, c, p, x, y, z) => place(ink(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), typeof c === 'number' ? mat(c) : c)), p, x, y + h/2, z);
 const cyl = (r, h, c, p, x, y, z, axis = 'y', seg = 24) => { const m = place(ink(new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat(c)), 40), p, x, y, z);
   if (axis === 'x') m.rotation.z = Math.PI/2; if (axis === 'z') m.rotation.x = Math.PI/2; return m; };
+const led = (p, x, y, z, r = .06) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color:0x8d877a })); m.position.set(x, y, z); p.add(m); return m; };
 const MONO = 'ui-monospace, Menlo, Consolas, monospace';
 function canvasTex(w, h, draw){ const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.redraw = fn => { g.clearRect(0, 0, w, h); fn(g, w, h); t.needsUpdate = true; }; t.redraw(draw); return t; }
 const panelMesh = (w, h, tex, p, x, y, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map:tex, transparent:true })); m.position.set(x, y, z); p.add(m); return m; };
 const rr = (g, x, y, w, h, r) => { g.beginPath(); g.roundRect(x, y, w, h, r); };
+const screenBg = (g, w, h) => { g.fillStyle = '#1d2a26'; g.fillRect(0, 0, w, h); };
 function label(text, sub){ const tex = canvasTex(512, 160, (g, w, h) => { rr(g, 8, 8, w - 16, h - 16, 26); g.fillStyle = '#fbf9f3'; g.fill(); g.lineWidth = 6; g.strokeStyle = '#231e16'; g.stroke();
     g.fillStyle = '#231e16'; g.textAlign = 'center'; g.font = `800 52px ${MONO}`; g.fillText(text, w/2, sub ? 72 : 96); if (sub){ g.font = `600 36px ${MONO}`; g.fillStyle = '#5c5548'; g.fillText(sub, w/2, 122); } });
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); s.scale.set(4.4, 1.375, 1); s.renderOrder = 10; return s; }
 
 /* world layout (1 unit ~ 25 cm): two towers of seven floors, the network on the board between them */
-const FH = 2.4, RW = 7, RD = 4.2, SX = -14, RX = 14, LIFTZ = RD/2 + .8, TOP = 7*FH;
+const FH = 2.4, RW = 7, RD = 4.2, SX = -14, RX = 14, LIFTZ = RD/2 + .8, TOP = 7*FH, Y0 = .18, BACK = -RD/2 + .17;
 const world = new THREE.Group(); scene3.add(world);
 box(46, .4, 19, 0xe6e1d4, world, 0, -.4, 2.5);
 const C = n => new THREE.Color(LCOL[n]).getHex();
@@ -348,165 +603,303 @@ function tower(x, name, ip){
     for (const s of [-1, 1]) box(.16, FH - .18, RD, C(n), f, s*(RW/2 - .08), .18, 0);
     const tex = canvasTex(640, 110, (gc, w, h) => { rr(gc, 4, 4, w - 8, h - 8, 18); gc.fillStyle = '#231e16'; gc.fill(); gc.fillStyle = LCOL[n]; rr(gc, 16, 16, 78, h - 32, 12); gc.fill();
       gc.fillStyle = '#231e16'; gc.font = `800 60px ${MONO}`; gc.textAlign = 'center'; gc.fillText(n, 55, 78); gc.textAlign = 'left'; gc.fillStyle = '#fbf9f3'; gc.fillText(LAYER[n].toUpperCase(), 116, 78); });
-    panelMesh(2.9, .5, tex, f, -RW/2 + 1.75, FH - .42, -RD/2 + .17);
+    panelMesh(2.9, .5, tex, f, -RW/2 + 1.75, FH - .42, BACK);
   }
   box(RW + .5, .35, RD + .5, 0xe9e3d6, g, 0, TOP, 0);
   const s = label(name, ip); s.position.set(0, TOP + 1.7, 0); g.add(s);
   for (const sx of [-1, 1]) cyl(.08, TOP + .4, 0x8f989b, g, sx*(RW/2 + .32), (TOP + .4)/2, LIFTZ, 'y', 10);
-  return { g, floors, x, label:s };
+  const lift = new THREE.Group(); lift.position.set(x, 0, LIFTZ); world.add(lift);
+  box(RW + .5, .12, 1.25, 0xc6ccce, lift, 0, -.12, 0);
+  for (const sx of [-1, 1]) box(.34, .3, .34, 0x8f989b, lift, sx*(RW/2 + .32), -.2, 0);
+  return { g, floors, x, label:s, lift };
 }
 const SEND = tower(SX, 'LAPTOP', NET.laptop), RECV = tower(RX, 'SERVER', NET.server);
-// the lift platform the message rides on, in front of the laptop's open floors
-const lift = new THREE.Group(); lift.position.set(SX, 6*FH - .2, LIFTZ); world.add(lift);
-box(RW + .5, .12, 1.25, 0xc6ccce, lift, 0, -.12, 0);
-for (const sx of [-1, 1]) box(.34, .3, .34, 0x8f989b, lift, sx*(RW/2 + .32), -.2, 0);
-const parcel = new THREE.Group(); parcel.position.y = .28; lift.add(parcel);
-// the network: switch, router, cables
-const SW = new THREE.Group(); SW.position.set(-4.5, 0, 6.5); world.add(SW); box(3.2, .6, 1.7, 0x76a0e2, SW, 0, 0, 0);
-for (let i = 0; i < 6; i++) box(.34, .26, .05, 0x26231f, SW, -1.1 + i*.44, .14, .86);
-const RT = new THREE.Group(); RT.position.set(4.5, 0, 6.5); world.add(RT); box(3.2, 1, 1.7, 0x5a82c6, RT, 0, 0, 0);
-for (let i = 0; i < 3; i++) box(.34, .26, .05, 0x26231f, RT, .2 + i*.44, .16, .86);
-box(1.1, .45, .05, 0x1d2a26, RT, -.8, .3, .86);
-const NETLABELS = [label('SWITCH'), label('ROUTER')]; NETLABELS[0].position.set(0, 2, 0); NETLABELS[1].position.set(0, 2.4, 0); SW.add(NETLABELS[0]); RT.add(NETLABELS[1]);
-const tube = (pts, c = 0x3e86d9) => place(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p))), 80, .1, 8), mat(c)), world, 0, 0, 0);
-tube([[SX + 3.1, .5, RD/2 - .1], [SX + 3.6, .12, 4], [SX + 6, .12, 7.4], [-6.1, .12, 7.4], [-6.1, .25, 6.5]]);
-tube([[-2.9, .25, 6.5], [-1, .12, 7.6], [1, .12, 7.6], [2.9, .3, 6.5]]);
-tube([[6.1, .3, 6.5], [6.1, .12, 7.4], [RX - 6, .12, 7.4], [RX - 3.6, .12, 4], [RX - 3.1, .5, RD/2 - .1]]);
+const liftY = n => Math.max(0, (n - 1)*FH - .2);
+SEND.lift.position.y = liftY(7); RECV.lift.position.y = liftY(1);
+const parcel = new THREE.Group(); parcel.position.y = .28; SEND.lift.add(parcel);
 
-/* the machines on each of the laptop's floors (each floor's slab top is at y = .18) */
-const Y0 = .18, BACK = -RD/2 + .17, ANIM = {};
-{ // 7 Application: a desk and a laptop whose screen shows the request being written
-  const f = SEND.floors[7], dz = -.5, dx = 1.1;
-  box(3.4, .1, 1.7, 0xd9a86c, f, dx, Y0 + .95, dz);
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(.1, .95, .1, 0xbf8a4f, f, dx + sx*1.55, Y0, dz + sz*.7);
+/* the network: switch and router with lit ports, a placard behind each, three cables */
+function device(x, w, h, c, nPorts, px0, name){
+  const g = new THREE.Group(); g.position.set(x, 0, 6.5); world.add(g); box(w, h, 1.7, c, g, 0, 0, 0);
+  const leds = [];
+  for (let i = 0; i < nPorts; i++){ const px = px0 + i*.44; box(.34, .26, .05, 0x26231f, g, px, .1, .86); leds.push(led(g, px, .5 > h - .1 ? h - .12 : .48, .88, .045)); }
+  const lab = label(name); lab.position.set(0, h + 1.4, 0); g.add(lab);
+  const tex = canvasTex(700, 400, () => {});
+  for (const sx of [-1.5, 1.5]) box(.08, 2.6, .08, 0x8f989b, g, sx, 0, -1.25);
+  box(3.4, 1.95, .08, 0xfbf9f3, g, 0, 1.15, -1.25); panelMesh(3.3, 1.88, tex, g, 0, 2.125, -1.2);
+  const spot = new THREE.Group(); spot.position.set(x, 0, 9.1); world.add(spot);
+  return { g, leds, lab, tex, spot, x };
+}
+const SW = device(-4.5, 3.2, .6, 0x76a0e2, 6, -1.1, 'SWITCH'), RT = device(4.5, 3.2, 1, 0x5a82c6, 3, .2, 'ROUTER');
+box(1.1, .45, .05, 0x1d2a26, RT.g, -.8, .3, .86);
+const RTSCREEN = canvasTex(330, 135, (g, w, h) => { screenBg(g, w, h); g.fillStyle = '#8af0ae'; g.font = `700 26px ${MONO}`; g.fillText('IN  eth0', 16, 38); g.fillText('OUT eth1', 16, 78); g.fillStyle = '#ffe066'; g.fillText('TTL 64 > 63', 16, 118); });
+panelMesh(1.0, .41, RTSCREEN, RT.g, -.8, .525, .88);
+const PORT = (d, i) => { scene3.updateMatrixWorld(); return d.g.localToWorld(new THREE.Vector3((d === SW ? -1.1 : .2) + i*.44, .23, .9)); };
+const tube = pts => { const curve = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p))); place(new THREE.Mesh(new THREE.TubeGeometry(curve, 120, .1, 8), mat(0x3e86d9)), world, 0, 0, 0); return curve; };
+const JS = SX + RW/2 + .55, JR = RX - RW/2 - .55;   // where each computer's cable leaves its plug (outside the floor-1 wall)
+const CURVE = {
+  1: tube([[JS, .76, -.2], [JS + .5, .45, -.2], [JS + 1, .12, 1.3], [-7.8, .12, 6.4], [-5.9, .12, 8.05], [-5.6, .27, 7.42]]),
+  2: tube([[-4.28, .27, 7.42], [-4.1, .12, 8.05], [0, .12, 8.2], [4.4, .12, 8.05], [4.7, .29, 7.42]]),
+  3: tube([[5.14, .29, 7.42], [5.4, .12, 8.05], [7.8, .12, 6.4], [JR - 1, .12, 1.3], [JR - .5, .45, -.2], [JR, .76, -.2]]),
+};
+const NETLABELS = [SW.lab, RT.lab];
+function drawMacTable(){ SW.tex.redraw((g, w, h) => { g.fillStyle = '#fbf9f3'; g.fillRect(0, 0, w, h); g.fillStyle = '#231e16'; g.font = `800 34px ${MONO}`; g.fillText('MAC TABLE', 26, 50);
+  g.font = `600 22px ${MONO}`; g.fillStyle = '#7a7263'; g.fillText('PORT  MAC ADDRESS        DEVICE', 26, 92);
+  (macForgot ? MACT.slice(0, 1) : MACT).forEach((r, i) => { const y = 140 + i*58; if (i === 0 || i === 3){ g.fillStyle = '#fff1bf'; g.fillRect(16, y - 38, w - 32, 52); }
+    g.fillStyle = '#231e16'; g.font = `700 28px ${MONO}`; g.fillText(`${r[0]}    ${r[1]}  ${r[2]}`, 26, y); });
+  if (macForgot){ g.fillStyle = '#c4452f'; g.font = `700 26px ${MONO}`; g.fillText('router unknown: flood!', 26, 260); } }); }
+function drawRouteTable(hi){ RT.tex.redraw((g, w, h) => { g.fillStyle = '#fbf9f3'; g.fillRect(0, 0, w, h); g.fillStyle = '#231e16'; g.font = `800 34px ${MONO}`; g.fillText('ROUTING TABLE', 26, 50);
+  g.font = `600 22px ${MONO}`; g.fillStyle = '#7a7263'; g.fillText('DESTINATION   HOW               PORT', 26, 92);
+  ROUTES.forEach((r, i) => { const y = 145 + i*62; if (i === hi){ g.fillStyle = '#fff1bf'; g.fillRect(16, y - 40, w - 32, 56); }
+    g.fillStyle = '#231e16'; g.font = `700 26px ${MONO}`; g.fillText(r[0].padEnd(14) + r[1].replace('directly connected', 'connected').padEnd(18) + r[2], 26, y); }); }); }
+drawMacTable(); drawRouteTable(1);
+
+/* the machines on each floor (each floor's slab top is at y = Y0). ANIM['s7'] = laptop floor 7, ANIM['r4'] = server floor 4, ... */
+const ANIM = {}, W3 = (o, x, y, z) => () => { scene3.updateMatrixWorld(); return o.localToWorld(new THREE.Vector3(x, y, z)); };
+function desk(f, x, z, w = 3.4, d = 1.7, h = .95){ box(w, .1, d, 0xd9a86c, f, x, Y0 + h, z); for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(.1, h, .1, 0xbf8a4f, f, x + sx*(w/2 - .15), Y0, z + sz*(d/2 - .15)); }
+function buildLaptop(f){ // 7, laptop: a desk and a laptop whose screen shows the request being written
+  const dz = -.5, dx = 1.1; desk(f, dx, dz);
   box(1.9, .07, 1.25, 0x4a4540, f, dx, Y0 + 1.05, dz + .1);
   const piv = new THREE.Group(); piv.position.set(dx, Y0 + 1.12, dz - .5); piv.rotation.x = -.2; f.add(piv);
   box(1.9, 1.25, .06, 0x3a3632, piv, 0, 0, 0);
-  ANIM.screen = canvasTex(512, 330, () => {}); ANIM.typed = 1;
-  panelMesh(1.76, 1.12, ANIM.screen, piv, 0, .625, .035);
+  const tex = canvasTex(512, 330, () => {}); panelMesh(1.76, 1.12, tex, piv, 0, .625, .035);
   cyl(.15, .32, 0xfbf7ea, f, dx + 1.25, Y0 + 1.21, dz + .25);
-  ANIM.src7 = () => piv.localToWorld(new THREE.Vector3(0, .6, .1));
+  ANIM.s7 = { tex, typed:1, src:W3(piv, 0, .6, .1) };
 }
-function drawScreen(){ const M = model(msg), k = ANIM.typed;
-  ANIM.screen.redraw((g, w, h) => { g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, w, h); g.fillStyle = '#e4e0d6'; g.fillRect(0, 0, w, 58);
-    ['#ef6a4c', '#f2c94c', '#8fd0a6'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(26 + i*26, 29, 8, 0, 7); g.fill(); });
-    rr(g, 100, 12, w - 116, 34, 17); g.fillStyle = '#fff'; g.fill(); g.fillStyle = '#231e16'; g.font = `600 22px ${MONO}`; g.fillText(NET.host + M.path, 116, 37);
-    const lines = [`GET ${M.path} HTTP/1.1`, `Host: ${NET.host}`], total = lines.join('').length; let left = Math.round(total*k);
-    g.font = `700 30px ${MONO}`; lines.forEach((ln, i) => { const part = ln.slice(0, Math.max(0, left)); left -= ln.length; g.fillStyle = '#231e16'; g.fillText(part, 26, 130 + i*48); });
-    if (k < 1 && Math.floor(performance.now()/250) % 2) { g.fillRect(26, 210, 16, 4); } }); }
-{ // 6 Presentation: a cipher machine with three rotors, and a padlock
-  const f = SEND.floors[6], dz = -.6;
-  box(2.5, .75, 1.4, 0x56685e, f, -.8, Y0, dz);
-  box(2.3, .06, 1.2, 0x44534b, f, -.8, Y0 + .75, dz);
-  const letters = canvasTex(512, 64, (g, w, h) => { g.fillStyle = '#efe8d4'; g.fillRect(0, 0, w, h); g.fillStyle = '#231e16'; g.font = `700 30px ${MONO}`; g.textAlign = 'center';
+function buildServer(f){ // 7, server: a rack of blade servers and a monitor showing the web server's log
+  box(1.6, 1.4, 1.2, 0x3a3632, f, -1.9, Y0, -1.3);
+  const blinks = [];
+  for (let i = 0; i < 4; i++){ box(1.44, .24, .06, 0x55504a, f, -1.9, Y0 + .16 + i*.3, -.68); blinks.push(led(f, -1.3, Y0 + .28 + i*.3, -.63, .04)); }
+  desk(f, 1.3, -.6, 2.6, 1.4);
+  box(.12, .2, .12, 0x3a3632, f, 1.3, Y0 + 1.05, -.9); const scr = box(1.6, .82, .07, 0x3a3632, f, 1.3, Y0 + 1.25, -.9);
+  const tex = canvasTex(512, 300, () => {}); panelMesh(1.48, .72, tex, f, 1.3, Y0 + 1.66, -.86);
+  ANIM.r7 = { tex, blinks, src:W3(scr, 0, 0, .1) };
+}
+function buildCipher(f, k){ // 6: a cipher machine with three rotors, and a padlock
+  const dz = -.6;
+  box(2.5, .75, 1.4, 0x56685e, f, -.8, Y0, dz); box(2.3, .06, 1.2, 0x44534b, f, -.8, Y0 + .75, dz);
+  const letters = canvasTex(512, 64, (g, w) => { g.fillStyle = '#efe8d4'; g.fillRect(0, 0, w, 64); g.fillStyle = '#231e16'; g.font = `700 30px ${MONO}`; g.textAlign = 'center';
     'ABCDEFGHIJKLMNOP'.split('').forEach((c, i) => g.fillText(c, 16 + i*32, 43)); });
-  letters.wrapS = THREE.RepeatWrapping;
-  ANIM.rotors = [0, 1, 2].map(i => { const holder = new THREE.Group(); holder.position.set(-1.35 + i*.55, Y0 + .92, dz - .1); holder.rotation.z = Math.PI/2; f.add(holder);
+  const rotors = [0, 1, 2].map(i => { const holder = new THREE.Group(); holder.position.set(-1.35 + i*.55, Y0 + .92, dz - .1); holder.rotation.z = Math.PI/2; f.add(holder);
     const m = new THREE.Mesh(new THREE.CylinderGeometry(.33, .33, .26, 32), [new THREE.MeshToonMaterial({ map:letters, gradientMap:GRAD }), mat(0xc9bf9f), mat(0xc9bf9f)]);
     m.castShadow = true; ink(m, 40); holder.add(m); return m; });
-  panelMesh(1.5, .3, canvasTex(400, 80, (g, w, h) => { g.fillStyle = '#e9e2cc'; rr(g, 2, 2, w - 4, h - 4, 10); g.fill(); g.fillStyle = '#231e16'; g.font = `800 40px ${MONO}`; g.textAlign = 'center'; g.fillText('AES-GCM', w/2, 56); }),
-    f, -.8, Y0 + .5, dz + .71);
-  const lockX = 1.5, lockZ = -.3;
-  box(.62, .52, .3, 0xd8b25a, f, lockX, Y0, lockZ);
-  ANIM.shackle = new THREE.Mesh(new THREE.TorusGeometry(.2, .05, 10, 24, Math.PI), mat(0xc6ccce)); ink(ANIM.shackle, 40);
-  place(ANIM.shackle, f, lockX, Y0 + .52, lockZ); ANIM.shackleY = Y0 + .52;
+  panelMesh(1.5, .3, canvasTex(400, 80, (g, w, h) => { g.fillStyle = '#e9e2cc'; rr(g, 2, 2, w - 4, h - 4, 10); g.fill(); g.fillStyle = '#231e16'; g.font = `800 40px ${MONO}`; g.textAlign = 'center'; g.fillText(k === 's6' ? 'ENCRYPT' : 'DECRYPT', w/2, 56); }), f, -.8, Y0 + .5, dz + .71);
+  const lockMat = new THREE.MeshToonMaterial({ color:0xd8b25a, gradientMap:GRAD });
+  box(.62, .52, .3, lockMat, f, 1.5, Y0, -.3);
+  const shackle = new THREE.Mesh(new THREE.TorusGeometry(.2, .05, 10, 24, Math.PI), mat(0xc6ccce)); ink(shackle, 40); place(shackle, f, 1.5, Y0 + .52, -.3);
   box(.55, .05, .14, 0xc6ccce, f, 2.35, Y0, .1); cyl(.14, .05, 0xc6ccce, f, 2.0, Y0 + .025, .1);
-  ANIM.src6 = () => f.localToWorld(new THREE.Vector3(-.8, Y0 + 1.3, dz));
+  ANIM[k] = { rotors, shackle, shackleY:Y0 + .52, lockMat, src:W3(f, -.8, Y0 + 1.3, dz) };
 }
-{ // 5 Session: a key cabinet, a session-ticket printer and a small screen replaying the handshake
-  const f = SEND.floors[5];
+function buildSession(f, k){ // 5: a key cabinet, a session-ticket printer and a screen replaying the handshake
   box(1.6, 1.7, .8, 0x8a7d6a, f, -2.3, Y0, -1.45);
-  ANIM.drawers = [];
-  for (let r = 0; r < 3; r++) for (const c of [-1, 1]){ const d = box(.66, .44, .06, 0xd9cfb8, f, -2.3 + c*.38, Y0 + .22 + r*.5, -1.02); ANIM.drawers.push(d); }
+  const drawers = [];
+  for (let r = 0; r < 3; r++) for (const c of [-1, 1]) drawers.push(box(.66, .44, .06, 0xd9cfb8, f, -2.3 + c*.38, Y0 + .22 + r*.5, -1.02));
   box(1.2, .55, .9, 0x3d3935, f, .2, Y0, -.6);
-  ANIM.ticket = panelMesh(.8, .9, canvasTex(256, 290, (g, w, h) => { g.fillStyle = '#fffdf4'; g.fillRect(0, 0, w, h); g.strokeStyle = '#231e16'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
+  const ticket = panelMesh(.8, .9, canvasTex(256, 290, (g, w, h) => { g.fillStyle = '#fffdf4'; g.fillRect(0, 0, w, h); g.strokeStyle = '#231e16'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
       g.fillStyle = '#231e16'; g.font = `800 30px ${MONO}`; g.fillText('SESSION', 22, 52); g.fillText('TICKET', 22, 88); g.font = `600 24px ${MONO}`; g.fillStyle = '#5c5548';
-      ['id 7f3a 91c2', 'AES-128-GCM', 'wiki.lan', 'valid 7 days'].forEach((t, i) => g.fillText(t, 22, 140 + i*36)); }), f, .2, Y0 + .56, -.3);
-  ANIM.ticket.rotation.x = -1.25; ANIM.ticket.material.side = THREE.DoubleSide;
-  box(.08, .9, .08, 0x5a554e, f, 2.1, Y0, -1.35); box(.6, .06, .4, 0x5a554e, f, 2.1, Y0, -1.35);
-  box(1.7, 1.05, .08, 0x272421, f, 2.1, Y0 + .85, -1.35);
-  ANIM.hsTex = canvasTex(512, 320, () => {}); ANIM.hsStep = -1;
-  panelMesh(1.56, .95, ANIM.hsTex, f, 2.1, Y0 + 1.375, -1.3);
+      ['id 7f3a 91c2', 'AES-128-GCM', NET.host, 'valid 7 days'].forEach((t, i) => g.fillText(t, 22, 140 + i*36)); }), f, .2, Y0 + .56, -.3);
+  ticket.rotation.x = -1.25; ticket.material.side = THREE.DoubleSide;
+  box(.08, .9, .08, 0x5a554e, f, 2.1, Y0, -1.35); box(.6, .06, .4, 0x5a554e, f, 2.1, Y0, -1.35); box(1.7, 1.05, .08, 0x272421, f, 2.1, Y0 + .85, -1.35);
+  const tex = canvasTex(512, 320, () => {}); panelMesh(1.56, .95, tex, f, 2.1, Y0 + 1.375, -1.3);
+  ANIM[k] = { drawers, ticket, tex, step:-1, src:W3(f, .2, Y0 + 1, -.6) };
 }
-function drawHS(){ const k = ANIM.hsStep;
-  ANIM.hsTex.redraw((g, w, h) => { g.fillStyle = '#1d2a26'; g.fillRect(0, 0, w, h); g.font = `700 30px ${MONO}`;
-    HS.forEach(([who, m], i) => { const on = i === k, done = i < k || k < 0; g.fillStyle = on ? '#ffe066' : done ? '#8af0ae' : '#3d5a50';
-      g.fillText((who === 'server' ? '<- ' : who === 'both' ? '<> ' : '-> ') + m, 26, 64 + i*68); }); }); }
-{ // 4 Transport: a conveyor with a stamp that prints port and sequence numbers, a port board and a counter
-  const f = SEND.floors[4], dz = -.7;
+function buildTransport(f, k){ // 4: a conveyor with a stamp that prints port and sequence numbers, a port board and a counter
+  const dz = -.7;
   box(3.8, .5, .9, 0x5a554e, f, -.4, Y0, dz);
   for (let i = 0; i < 8; i++) cyl(.08, .86, 0xc6ccce, f, -2.1 + i*.48, Y0 + .5, dz, 'z', 12);
   [[-1.9, .9], [-1.1, .9], [-.4, .55]].forEach(([x, w]) => box(w, .38, .5, 0xfbf7ea, f, x, Y0 + .58, dz));
-  box(.3, 1.75, .3, 0x8f989b, f, .9, Y0, -1.45);
-  box(.3, .2, .95, 0x8f989b, f, .9, Y0 + 1.55, -1.1);
-  ANIM.head = box(.6, .32, .6, C(4), f, .9, Y0 + 1.2, dz); ANIM.headY = ANIM.head.position.y;
-  cyl(.06, .35, 0x8f989b, ANIM.head, 0, .33, 0, 'y', 8);
+  box(.3, 1.75, .3, 0x8f989b, f, .9, Y0, -1.45); box(.3, .2, .95, 0x8f989b, f, .9, Y0 + 1.55, -1.1);
+  const head = box(.6, .32, .6, C(4), f, .9, Y0 + 1.2, dz); cyl(.06, .35, 0x8f989b, head, 0, .33, 0, 'y', 8);
   const ports = canvasTex(520, 300, (g, w, h) => { g.fillStyle = '#efe8d4'; rr(g, 3, 3, w - 6, h - 6, 16); g.fill(); g.lineWidth = 5; g.strokeStyle = '#231e16'; g.stroke();
     g.fillStyle = '#231e16'; g.font = `800 28px ${MONO}`; g.fillText('PORTS', 22, 42);
     [[22, 80], [25, 205], [53, 330], [80, 455], [443, 80], [3306, 205], [5353, 330], [49152, 455]].forEach(([p, x], i) => { const y = i < 4 ? 120 : 220, hot = p === 443 || p === 49152;
       g.beginPath(); g.arc(x, y - 18, 24, 0, 7); g.fillStyle = hot ? '#8fd0a6' : '#cfc6b0'; g.fill(); g.stroke(); g.fillStyle = '#231e16'; g.font = `700 24px ${MONO}`; g.textAlign = 'center'; g.fillText(p, x, y + 34); g.textAlign = 'left'; }); });
   panelMesh(2.2, 1.27, ports, f, 2.15, 1.35, BACK);
   box(1.05, .6, .36, 0x272421, f, 2.35, Y0, -.15);
-  ANIM.seqTex = canvasTex(256, 128, () => {});
-  panelMesh(.9, .45, ANIM.seqTex, f, 2.35, Y0 + .3, .04);
-  ANIM.src4 = () => ANIM.head.localToWorld(new THREE.Vector3(0, -.2, 0));
+  const tex = canvasTex(256, 128, () => {}); panelMesh(.9, .45, tex, f, 2.35, Y0 + .3, .04);
+  ANIM[k] = { head, headY:head.position.y, tex, src:W3(head, 0, -.2, 0) };
 }
-function drawSeq(){ const M = model(msg); ANIM.seqTex.redraw((g, w, h) => { g.fillStyle = '#1d2a26'; g.fillRect(0, 0, w, h); g.fillStyle = '#8af0ae'; g.font = `800 40px ${MONO}`; g.textAlign = 'center';
-  g.fillText(M.proto === 'tcp' ? 'SEQ 1' : 'NO SEQ', w/2, 58); g.font = `600 26px ${MONO}`; g.fillText(M.proto === 'tcp' ? `ACK 1  ${M.record.length}B` : `UDP ${M.record.length}B`, w/2, 100); }); }
-{ // floor 1 (not built out yet): the network card the cable plugs into
-  const f = SEND.floors[1]; box(2.4, .07, 1.1, 0x2f8a4a, f, 2, Y0 + .02, 1.2); box(.5, .4, .5, 0xc6ccce, f, 3.05, Y0 + .1, 1.6);
-  const g2 = RECV.floors[1]; box(2.4, .07, 1.1, 0x2f8a4a, g2, -2, Y0 + .02, 1.2); box(.5, .4, .5, 0xc6ccce, g2, -3.05, Y0 + .1, 1.6);
+function buildNetwork(f, k){ // 3: a signpost that decides where packets go, and a card with the routing table
+  cyl(.08, 2.0, 0x8a6a45, f, -.55, Y0 + 1.0, -1.25);
+  const tex = canvasTex(620, 300, () => {});
+  box(2.7, 1.25, .06, 0xfbf9f3, f, .75, Y0 + .7, -1.2); panelMesh(2.62, 1.17, tex, f, .75, Y0 + 1.325, -1.16);
+  desk(f, -2.2, -.2, 1.8, 1.2, .7);
+  panelMesh(1.3, .8, canvasTex(330, 200, (g, w, h) => { g.fillStyle = '#fffdf4'; g.fillRect(0, 0, w, h); g.strokeStyle = '#231e16'; g.lineWidth = 5; g.strokeRect(2, 2, w - 4, h - 4);
+      g.fillStyle = '#231e16'; g.font = `800 24px ${MONO}`; g.fillText(k === 's3' ? 'MY ROUTES' : 'MY ADDRESS', 16, 36); g.font = `600 19px ${MONO}`;
+      (k === 's3' ? ['10.0.0.0/24  on this', '  network', 'default  via 10.0.0.1'] : ['10.0.1.7/24', 'gateway 10.0.1.1', 'not mine: drop']).forEach((t, i) => g.fillText(t, 16, 80 + i*34)); }), f, -2.2, Y0 + .81, -.2).rotation.x = -Math.PI/2;
+  ANIM[k] = { tex, src:W3(f, .75, Y0 + 1.3, -1.1) };
 }
+function buildLink(f, k){ // 2: a frame machine that computes the CRC, and a board showing the ARP cache (laptop) or the card's own MAC (server)
+  box(1.8, .75, 1.1, 0x5b6470, f, -1.0, Y0, -.7);
+  const tex = canvasTex(420, 150, () => {}); panelMesh(1.5, .52, tex, f, -1.0, Y0 + .42, -.14);
+  const board = canvasTex(560, 260, () => {});
+  box(2.4, 1.15, .06, 0xfbf9f3, f, 1.75, Y0 + .7, -1.95); panelMesh(2.32, 1.07, board, f, 1.75, Y0 + 1.275, -1.91);
+  box(.5, .3, .4, 0xe6dcc0, f, 1.5, Y0, -.4); box(.5, .3, .4, 0xe6dcc0, f, 2.1, Y0, -.4); box(.5, .3, .4, 0xe6dcc0, f, 1.8, Y0 + .3, -.4);   // a stack of frame envelopes, waiting
+  ANIM[k] = { tex, board, src:W3(f, -1.0, Y0 + 1.1, -.7) };
+}
+function buildNIC(f, k, dir){ // 1: the network card (PHY, magnetics, RJ45 socket through the wall), its link lights, and an oscilloscope
+  const X = v => v*dir;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(.05, .26, 0xc6ccce, f, X(1.4) + sx*1.4, Y0 + .13, -.2 + sz*.65, 'y', 8);
+  box(3.2, .08, 1.7, 0x2f8a4a, f, X(1.4), Y0 + .26, -.2);
+  box(.75, .14, .75, 0x26231f, f, X(1.25), Y0 + .34, -.25);
+  box(.55, .34, .7, 0xe6dcc0, f, X(2.15), Y0 + .34, -.25);
+  box(.9, .12, .55, 0x26231f, f, X(.15), Y0 + .34, -.5);
+  const jack = box(.7, .5, .66, 0xc6ccce, f, X(RW/2 - .16 - .35), Y0 + .34, -.2);
+  const link = led(f, X(RW/2 - .5), Y0 + .9, -.05, .05), act = led(f, X(RW/2 - .5), Y0 + .9, -.35, .05);
+  const cols = [0xf08a2b, 0x43a565, 0x3e86d9, 0x8a5a2c];
+  cols.forEach((c, i) => { const z = -.48 + i*.15, a = [X(1.62), Y0 + .42, z], b = [X(1.88), Y0 + .42, z], pts = [], pts2 = [];
+    for (let t = 0; t <= 24; t++){ const u = t/24, ph = u*Math.PI*8; pts.push(new THREE.Vector3(a[0] + (b[0] - a[0])*u, a[1] + .03*Math.sin(ph), z + .03*Math.cos(ph))); pts2.push(new THREE.Vector3(a[0] + (b[0] - a[0])*u, a[1] - .03*Math.sin(ph), z - .03*Math.cos(ph))); }
+    f.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color:c }))); f.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2), new THREE.LineBasicMaterial({ color:0xfbf7ea }))); });
+  const plug = box(.5, .32, .36, 0xcfe3f2, f, X(RW/2 + .3), Y0 + .42, -.2); plug.userData.x0 = plug.position.x;
+  box(1.6, 1.0, .8, 0x8a8f94, f, X(-1.9), Y0, -1.35);
+  const scope = canvasTex(400, 230, (g, w, h) => { screenBg(g, w, h); g.strokeStyle = '#2d4a40'; g.lineWidth = 1; for (let x = 0; x < w; x += 40){ g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    g.strokeStyle = '#8af0ae'; g.lineWidth = 4; g.beginPath(); const lv = [0, 1, 0, -1]; let s = 0; const bits = [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1]; g.moveTo(0, 115);
+    bits.forEach((b, i) => { if (b) s = (s + 1) % 4; const y = 115 - lv[s]*60; g.lineTo(i*w/bits.length, y); g.lineTo((i + 1)*w/bits.length, y); }); g.stroke(); });
+  panelMesh(1.3, .75, scope, f, X(-1.9), Y0 + .5, -.94);
+  ANIM[k] = { link, act, plug, dir, src:W3(jack, 0, .3, 0) };
+}
+buildLaptop(SEND.floors[7]); buildServer(RECV.floors[7]);
+buildCipher(SEND.floors[6], 's6'); buildCipher(RECV.floors[6], 'r6');
+buildSession(SEND.floors[5], 's5'); buildSession(RECV.floors[5], 'r5');
+buildTransport(SEND.floors[4], 's4'); buildTransport(RECV.floors[4], 'r4');
+buildNetwork(SEND.floors[3], 's3'); buildNetwork(RECV.floors[3], 'r3');
+buildLink(SEND.floors[2], 's2'); buildLink(RECV.floors[2], 'r2');
+buildNIC(SEND.floors[1], 's1', 1); buildNIC(RECV.floors[1], 'r1', -1);
 
-/* the message: a row of blocks on the lift, one per header, in its layer's colour */
+/* screens and boards that change */
+function drawScreen(){ const M = model(msg), A = ANIM.s7, k = A.typed;
+  A.tex.redraw((g, w, h) => { g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, w, h); g.fillStyle = '#e4e0d6'; g.fillRect(0, 0, w, 58);
+    ['#ef6a4c', '#f2c94c', '#8fd0a6'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(26 + i*26, 29, 8, 0, 7); g.fill(); });
+    rr(g, 100, 12, w - 116, 34, 17); g.fillStyle = '#fff'; g.fill(); g.fillStyle = '#231e16'; g.font = `600 22px ${MONO}`; g.fillText(NET.host + M.path, 116, 37);
+    const lines = [`GET ${M.path} HTTP/1.1`, `Host: ${NET.host}`], total = lines.join('').length; let left = Math.round(total*k);
+    g.font = `700 30px ${MONO}`; lines.forEach((ln, i) => { g.fillStyle = '#231e16'; g.fillText(ln.slice(0, Math.max(0, left)), 26, 130 + i*48); left -= ln.length; }); }); }
+function serverLog(k = 0){ const M = model(msg), A = ANIM.r7;
+  const draw = e => A.tex.redraw((g, w, h) => { screenBg(g, w, h); g.font = `700 24px ${MONO}`; g.fillStyle = '#8af0ae'; g.fillText('nginx  access.log', 22, 40);
+    g.font = `600 22px ${MONO}`; g.fillStyle = '#5f8f7c'; g.fillText('10.0.0.20 "GET /favicon.ico" 200', 22, 90);
+    if (e > 0){ g.fillStyle = '#ffe066'; const line = `10.0.0.20 "GET ${M.path}" 200`; g.fillText(line.slice(0, Math.ceil(line.length*e)), 22, 130); }
+    g.fillStyle = '#8af0ae'; g.font = `700 24px ${MONO}`; if (e >= 1) g.fillText('-> HTTP/1.1 200 OK', 22, 190); });
+  if (k === null) return draw(0); tween(1.2, draw); }
+function drawHS(k){ const A = ANIM[k], s = A.step;
+  A.tex.redraw((g, w, h) => { screenBg(g, w, h); g.font = `700 30px ${MONO}`;
+    HS.forEach(([who, m], i) => { g.fillStyle = i === s ? '#ffe066' : (s < 0 || i < s) ? '#8af0ae' : '#3d5a50';
+      g.fillText((who === 'server' ? (k === 's5' ? '<- ' : '-> ') : who === 'both' ? '<> ' : (k === 's5' ? '-> ' : '<- ')) + m, 26, 64 + i*68); }); }); }
+function drawSeq(k){ const M = model(msg), A = ANIM[k], r = k === 'r4';
+  A.tex.redraw((g, w) => { g.fillStyle = '#1d2a26'; g.fillRect(0, 0, w, 128); g.fillStyle = '#8af0ae'; g.font = `800 40px ${MONO}`; g.textAlign = 'center';
+    g.fillText(M.proto === 'tcp' ? (r ? `ACK ${1 + M.record.length}` : 'SEQ 1') : (r ? 'NO ACK' : 'NO SEQ'), w/2, 58); g.font = `600 26px ${MONO}`;
+    g.fillText(M.proto === 'tcp' ? (r ? 'got it, in order' : `ACK 1  ${M.record.length}B`) : `UDP ${M.record.length}B`, w/2, 100); }); }
+function drawSign(side, hi){ const A = ANIM[side + '3'];
+  const rows = side === 's' ? [['10.0.0.x', 'this network'], ['anything else', 'gateway 10.0.0.1']] : [['10.0.1.7', "that's me"], ['anything else', 'not mine: drop']];
+  A.tex.redraw((g, w, h) => { g.fillStyle = '#fbf9f3'; g.fillRect(0, 0, w, h);
+    rows.forEach(([a, b], i) => { const y = 24 + i*140, on = i === hi; g.fillStyle = on ? '#6cc3cf' : '#e6e0d0'; g.beginPath(); g.moveTo(20, y); g.lineTo(w - 90, y); g.lineTo(w - 20, y + 55); g.lineTo(w - 90, y + 110); g.lineTo(20, y + 110); g.closePath(); g.fill();
+      g.lineWidth = 5; g.strokeStyle = '#231e16'; g.stroke(); g.fillStyle = '#231e16'; g.font = `800 34px ${MONO}`; g.fillText(a, 44, y + 46); g.font = `600 28px ${MONO}`; g.fillText(b, 44, y + 88); }); }); }
+function crcScreen(side, ok = true){ const M = model(msg), A = ANIM[side + '2'], h = M.hop[side === 's' ? 'A' : 'B'];
+  A.tex.redraw((g, w, hh) => { screenBg(g, w, hh); g.font = `700 30px ${MONO}`; g.fillStyle = '#8af0ae'; g.fillText('CRC-32  ' + hx(h.crc, 8), 22, 52);
+    g.fillStyle = side === 's' ? '#8af0ae' : ok ? '#ffe066' : '#ff8a7a'; g.fillText(side === 's' ? 'FCS added to frame' : ok ? 'matches FCS: keep' : 'MISMATCH: drop', 22, 108); });
+  A.board.redraw((g, w, hh) => { g.fillStyle = '#fbf9f3'; g.fillRect(0, 0, w, hh); g.fillStyle = '#231e16'; g.font = `800 32px ${MONO}`;
+    g.fillText(side === 's' ? 'ARP CACHE' : 'THIS CARD', 24, 48); g.font = `600 24px ${MONO}`;
+    (side === 's' ? [['10.0.0.1', MAC.rtA], ['10.0.0.33', 'a8:5e:45:31:7c:02']] : [['my MAC', MAC.server], ['also accept', 'ff:ff:ff:ff:ff:ff']]).forEach(([a, b], i) => {
+      if (i === 0){ g.fillStyle = '#fff1bf'; g.fillRect(14, 82 + i*70, w - 28, 58); } g.fillStyle = '#231e16'; g.fillText(a, 24, 118 + i*70); g.fillText(b, 220, 118 + i*70); }); }); }
+function flashArp(){ const A = ANIM.s2; let n = 0; const f = () => { A.board.redraw((g, w, h) => { g.fillStyle = n % 2 ? '#fff1bf' : '#fbf9f3'; g.fillRect(0, 0, w, h); g.fillStyle = '#231e16'; g.font = `800 32px ${MONO}`; g.fillText('ARP CACHE', 24, 48); g.font = `600 24px ${MONO}`; g.fillText(n < 5 ? 'who has 10.0.0.1 ?' : `10.0.0.1  ${MAC.rtA}`, 24, 118); });
+    if (++n < 7) wait(.3, f); else wait(.6, () => crcScreen('s')); }; f(); }
+drawScreen(); serverLog(null); drawHS('s5'); drawHS('r5'); drawSeq('s4'); drawSeq('r4'); drawSign('s', 1); drawSign('r', 0); crcScreen('s'); crcScreen('r');
+
+/* the message: a row of blocks, one per header, in its layer's colour. It rides the lifts, and is laid out in front of the switch and router. */
 const blocks = new Map();
 const blockW = b => .36 + .19*Math.log2(b.bytes);
 function blockTex(b, w){ return canvasTex(Math.round(154*w/.56), 154, (g, cw, ch) => {
   g.fillStyle = b.cream ? '#fbf7ea' : LCOL[b.layer]; g.fillRect(0, 0, cw, ch);
   if (b.enc){ g.strokeStyle = 'rgba(255,255,255,.45)'; g.lineWidth = 14; for (let x = -ch; x < cw; x += 34){ g.beginPath(); g.moveTo(x, ch); g.lineTo(x + ch, 0); g.stroke(); } }
-  g.fillStyle = '#231e16'; g.textAlign = 'center'; g.font = `800 ${b.label.length > 6 ? 30 : 40}px ${MONO}`; g.fillText(b.label, cw/2, 70); g.font = `600 30px ${MONO}`; g.fillText(b.bytes + ' B', cw/2, 114); }); }
+  g.fillStyle = '#231e16'; g.textAlign = 'center'; g.font = `800 ${b.label.length > 6 ? 30 : 40}px ${MONO}`; g.fillText(b.label, cw/2, 70); g.font = `600 ${b.sub ? 24 : 30}px ${MONO}`; g.fillText(b.sub || b.bytes + ' B', cw/2, 114); }); }
+const sigOf = b => [b.label, b.bytes, b.layer, b.sub || '', b.enc ? 1 : 0].join('|');
 function makeBlock(b){ const w = blockW(b), side = mat(b.cream ? 0xfbf7ea : C(b.layer)), front = new THREE.MeshToonMaterial({ map:blockTex(b, w), gradientMap:GRAD });
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, .56, .6), [side, side, side, side, front, front]); ink(m); m.castShadow = true; m.userData = { ...b, w }; return m; }
-function setParcel(list, src){
-  const sig = b => b.label + b.bytes + b.layer;
+function flyAway(m, sink){ const p0 = m.position.clone(), s0 = m.scale.x, to = sink ? parcel.worldToLocal(sink.clone()) : null;
+  tween(to ? .8 : .4, e => { if (to) m.position.set(p0.x + (to.x - p0.x)*e, p0.y + (to.y - p0.y)*e + Math.sin(Math.PI*e)*1.2, p0.z + (to.z - p0.z)*e); m.scale.setScalar(s0*(1 - .85*e)); }, () => m.parent && m.parent.remove(m)); }
+function setParcel(list, src, sink){
+  scene3.updateMatrixWorld();
   const ws = list.map(blockW), gap = .1, tot = ws.reduce((a, b) => a + b, 0) + gap*Math.max(0, list.length - 1);
-  const k = Math.min(1, 4.4/Math.max(tot, .01)); parcel.scale.setScalar(k);
+  parcel.scale.setScalar(Math.min(1, 7/Math.max(tot, .01))); parcel.updateMatrixWorld();
   let x = -tot/2; const keep = new Set();
   list.forEach((b, i) => { const cx = x + ws[i]/2; x += ws[i] + gap; keep.add(b.key);
     let m = blocks.get(b.key);
-    if (m && sig(m.userData) !== sig(b)){ const old = m; m = makeBlock(b); m.position.copy(old.position); parcel.remove(old); parcel.add(m); blocks.set(b.key, m); }
+    if (m && m.userData.hop !== b.hop){ flyAway(m, sink); blocks.delete(b.key); m = null; }
+    if (m && sigOf(m.userData) !== sigOf(b)){ const old = m; m = makeBlock(b); m.position.copy(old.position); parcel.remove(old); parcel.add(m); blocks.set(b.key, m); }
     if (!m){ m = makeBlock(b); blocks.set(b.key, m); parcel.add(m);
-      const from = src ? parcel.worldToLocal(src.clone()) : new THREE.Vector3(cx, 2, 0);
+      const from = src ? parcel.worldToLocal(src.clone()) : new THREE.Vector3(cx, 2.5, 0);
       m.position.copy(from); m.scale.setScalar(.2);
-      tween(.9, e => { m.position.set(from.x + (cx - from.x)*e, from.y + (0 - from.y)*e + Math.sin(Math.PI*e)*1.4, from.z*(1 - e)); m.scale.setScalar(.2 + .8*e); });
+      tween(.9, e => { m.position.set(from.x + (cx - from.x)*e, from.y*(1 - e) + Math.sin(Math.PI*e)*1.4, from.z*(1 - e)); m.scale.setScalar(.2 + .8*e); });
     } else { const x0 = m.position.x, y0 = m.position.y, z0 = m.position.z; tween(.6, e => m.position.set(x0 + (cx - x0)*e, y0*(1 - e), z0*(1 - e))); }
   });
-  for (const [key, m] of blocks) if (!keep.has(key)){ blocks.delete(key); const s0 = m.scale.x; tween(.4, e => m.scale.setScalar(s0*(1 - e)), () => parcel.remove(m)); }
+  for (const [key, m] of blocks) if (!keep.has(key)){ blocks.delete(key); flyAway(m, sink); }
 }
+function relocate(holder, instant){
+  if (parcel.parent === holder || (!holder && !parcel.parent)) return;
+  for (const m of blocks.values()){ const s0 = m.scale.x; tween(.3, e => m.scale.setScalar(s0*(1 - e)), () => m.parent && m.parent.remove(m)); }
+  blocks.clear();
+  const move = () => { if (parcel.parent) parcel.parent.remove(parcel); if (holder) holder.add(parcel); };
+  if (instant) { for (const m of [...parcel.children]) parcel.remove(m); move(); } else wait(.32, move);
+}
+
+/* bits on the wire: a train of pulses along a cable (yellow = 1, dark = 0) */
+const PULSES = Array.from({ length:16 }, (_, i) => { const m = new THREE.Mesh(new THREE.SphereGeometry(.085, 10, 8), new THREE.MeshBasicMaterial({ color:i % 2 ? 0x2b3f6b : 0xffe066 })); m.visible = false; world.add(m); return m; });
+let pulseCurve = null, noiseUntil = 0;
+function updatePulses(t){ const on = pulseCurve && !msg.unplug;
+  PULSES.forEach((m, i) => { m.visible = !!on; if (!on) return; const u = ((t*.28 - i*.018) % 1.3 + 1.3) % 1.3; if (u > 1){ m.visible = false; return; }
+    const p = pulseCurve.getPointAt(u); m.position.set(p.x, p.y + .1, p.z); m.material.color.setHex(i === 7 && performance.now() < noiseUntil ? 0xe2483d : i % 2 ? 0x2b3f6b : 0xffe066); }); }
 
 /* tiny animation helpers */
 const anims = [];
 const easeIO = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2;
 function tween(dur, fn, done){ anims.push({ t:0, dur, fn, done }); }
 function wait(s, fn){ tween(s, () => {}, fn); }
-function typeScreen(){ ANIM.typed = 0; tween(1.2, e => { ANIM.typed = e; drawScreen(); }, () => { ANIM.typed = 1; drawScreen(); }); }
-function spinRotors(){ const r0 = ANIM.rotors.map(r => r.rotation.y); tween(1.4, e => ANIM.rotors.forEach((r, i) => r.rotation.y = r0[i] + e*(6 + i*3.3)));
-  tween(.5, e => ANIM.shackle.position.y = ANIM.shackleY + .18*(1 - e)); }
-function printTicket(){ tween(1, e => ANIM.ticket.position.z = -.3 + .55*e); playHandshake(); }
-function playHandshake(){ let i = 0; const step = () => { ANIM.hsStep = i; drawHS(); document.querySelectorAll('#hs li').forEach((li, j) => li.classList.toggle('on', j === i));
-    const d = ANIM.drawers[i % ANIM.drawers.length]; const z0 = d.position.z; tween(.5, e => d.position.z = z0 + Math.sin(Math.PI*e)*.3);
-    if (++i <= HS.length - 1) wait(.75, step); else wait(.75, () => { ANIM.hsStep = -1; drawHS(); document.querySelectorAll('#hs li').forEach(li => li.classList.remove('on')); }); };
+function typeScreen(){ ANIM.s7.typed = 0; tween(1.2, e => { ANIM.s7.typed = e; drawScreen(); }, () => { ANIM.s7.typed = 1; drawScreen(); }); }
+function spinRotors(k){ const A = ANIM[k], r0 = A.rotors.map(r => r.rotation.y); A.lockMat.color.setHex(0xd8b25a);
+  tween(1.4, e => A.rotors.forEach((r, i) => r.rotation.y = r0[i] + e*(6 + i*3.3)));
+  if (k === 's6') tween(.5, e => A.shackle.position.y = A.shackleY + .18*(1 - e)); else tween(.5, e => A.shackle.position.y = A.shackleY + .18*e); }
+function lockFail(){ const A = ANIM.r6; A.lockMat.color.setHex(0xe2483d); tween(.4, e => A.shackle.position.y = A.shackleY + .35*e); wait(2.5, () => { A.lockMat.color.setHex(0xd8b25a); A.shackle.position.y = A.shackleY; }); }
+function printTicket(){ const t = ANIM.s5.ticket; tween(1, e => t.position.z = -.3 + .55*e); }
+function playHandshake(k){ const A = ANIM[k]; let i = 0;
+  const step = () => { A.step = i; drawHS(k); document.querySelectorAll('#hs li').forEach((li, j) => li.classList.toggle('on', j === i));
+    const d = A.drawers[i % A.drawers.length], z0 = d.position.z; tween(.5, e => d.position.z = z0 + Math.sin(Math.PI*e)*.3);
+    if (++i <= HS.length - 1) wait(.75, step); else wait(.75, () => { A.step = -1; drawHS(k); document.querySelectorAll('#hs li').forEach(li => li.classList.remove('on')); }); };
   step(); }
-function stamp(){ drawSeq(); const y = ANIM.headY; tween(.7, e => ANIM.head.position.y = y - .42*Math.sin(Math.PI*Math.min(1, e*2)) - .42*Math.sin(Math.PI*Math.max(0, e*2 - 1))); }
-drawScreen(); drawHS(); drawSeq();
+function playList(id, dt){ const lis = [...document.querySelectorAll(`#${id} li`)]; let i = 0;
+  const step = () => { lis.forEach((li, j) => li.classList.toggle('on', j === i)); if (++i < lis.length) wait(dt, step); else wait(dt, () => lis.forEach(li => li.classList.remove('on'))); }; step(); }
+function stamp(k){ drawSeq(k); const A = ANIM[k], y = A.headY; tween(.7, e => A.head.position.y = y - .42*Math.sin(Math.PI*Math.min(1, e*2)) - .42*Math.sin(Math.PI*Math.max(0, e*2 - 1))); }
+function setPlug(){ const A = ANIM.s1; A.plug.position.x = A.plug.userData.x0 + (msg.unplug ? .7 : 0); A.plug.position.y = Y0 + .58 + (msg.unplug ? -.15 : 0); }
+let blinkT = { sw:0, rt:0 }, blinkIdx = { sw:[], rt:[] };
+function blinkPorts(d, idx){ blinkT[d] = performance.now() + 1800; blinkIdx[d] = idx; }
+function flood(){ macForgot = true; drawMacTable(); blinkPorts('sw', [0, 1, 2, 3, 4, 5]); const ex = document.getElementById('extra'); if (ex) ex.innerHTML = CONTENT.switch.extra();
+  wait(3, () => { macForgot = false; drawMacTable(); const e2 = document.getElementById('extra'); if (e2 && ROUTE[cur].id === 'switch') e2.innerHTML = CONTENT.switch.extra(); }); }
+function updateLeds(now){
+  for (const d of ['sw', 'rt']){ const dev = d === 'sw' ? SW : RT, used = d === 'sw' ? [0, 3] : [0, 1], blink = now < blinkT[d];
+    dev.leds.forEach((l, i) => l.material.color.setHex(blink && blinkIdx[d].includes(i) ? (Math.floor(now/90) % 2 ? 0xf4b829 : 0x43c25c) : used.includes(i) ? 0x43c25c : 0x8d877a)); }
+  for (const k of ['s1', 'r1']){ const A = ANIM[k], linkOk = k === 'r1' || !msg.unplug, busy = pulseCurve && linkOk && (k === 's1' ? pulseCurve === CURVE[1] : pulseCurve === CURVE[3]);
+    A.link.material.color.setHex(linkOk ? 0x43c25c : 0x5a554e); A.act.material.color.setHex(busy && Math.floor(now/110) % 2 ? 0xf4b829 : 0x5a554e); }
+  ANIM.r7.blinks.forEach((l, i) => l.material.color.setHex(Math.floor(now/400 + i*1.7) % 3 ? 0x43c25c : 0x2f6a3e));
+}
+
+/* where the message sits, where new blocks come from, where removed blocks go */
+const holderFor = st => st.kind === 'send' ? SEND.lift : st.kind === 'recv' ? RECV.lift : st.kind === 'switch' ? SW.spot : st.kind === 'router' ? RT.spot : null;
+function srcFor(st){ if (st.kind === 'send' || st.kind === 'recv'){ const A = ANIM[(st.kind === 'send' ? 's' : 'r') + st.layer]; return A && A.src ? A.src() : null; }
+  if (st.kind === 'switch') return PORT(SW, 0); if (st.kind === 'router') return PORT(RT, 0); return null; }
+const curveFor = st => ({ 'send-1':CURVE[1], 'cable-1':CURVE[1], 'switch':CURVE[2], 'router':CURVE[3], 'cable-2':CURVE[3], 'recv-1':CURVE[3] })[st.id] || null;
+function arrive(st){ const M = model(msg), c = CONTENT[st.id], here = () => ROUTE[cur] === st;
+  if (!here()) return;
+  if (!holderFor(st)){ if (c.arrive) c.arrive(); return; }
+  if (st.kind === 'router'){ setParcel(frameB(M, 'A', false), PORT(RT, 0)); const top = W3(RT.g, 0, 1.4, 0); wait(1.3, () => { if (here()) setParcel(frameB(M, 'B', false), top(), top()); }); }
+  else if (st.kind === 'recv'){ setParcel(pduFor(st, M).map(b => ({ ...b, gone:false })), st.layer === 1 ? W3(RECV.floors[1], -RW/2 - .3, Y0 + .3, -.2)() : srcFor(st)); wait(1.1, () => { if (here()) setParcel(leaveFor(st, M), srcFor(st), srcFor(st)); }); }
+  else setParcel(pduFor(st, M), srcFor(st));
+  if (c.arrive) c.arrive(); }
 
 /* camera: each stop has a shot; the camera eases between shots, and you can drag to look around */
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 function shotFor(st){
   if (st.kind === 'intro') return { target:V(0, 6.5, 2), off:V(15, 19, 62) };
-  const t = st.kind === 'recv' ? RECV : SEND, y = (st.layer - 1)*FH;
-  if (st.kind === 'send' || st.kind === 'recv') return { target:V(t.x + .2, y + 1.0, 1.2), off:V(7.4, 1.6, 17) };
-  return { target:V(0, 1, 6), off:V(6, 7, 18) };
+  if (st.kind === 'send' || st.kind === 'recv'){ const t = st.kind === 'recv' ? RECV : SEND; return { target:V(t.x + .2, (st.layer - 1)*FH + 1.0, 1.2), off:V(7.4, 1.6, 17) }; }
+  if (st.kind === 'switch') return { target:V(SW.x, .9, 7.9), off:V(3.4, 3.4, 11) };
+  if (st.kind === 'router') return { target:V(RT.x, 1.0, 7.9), off:V(3.4, 3.6, 11.5) };
+  return st.id === 'cable-1' ? { target:V(-7.8, .6, 5), off:V(4, 5.5, 14) } : { target:V(8.6, .6, 5), off:V(-1, 5.5, 14.5) };
 }
 const cam = { target:V(0, 6.5, 2), off:V(15, 19, 62), yaw:0, pitch:0, zoom:1 };
 function moveCamera(st, instant){
@@ -530,26 +923,31 @@ function applyCamera(){
 /* ================= ENGINE: navigation, panel, route map ================= */
 let cur = 0, sel = null;
 const built = i => !!CONTENT[ROUTE[i].id];
+const sendIdx = n => ROUTE.findIndex(s => s.id === 'send-' + n);
 function go(i, instant = false){
   i = Math.max(0, Math.min(ROUTE.length - 1, i));
-  if (!built(i)) return toast(`${ROUTE[i].short}: coming in the next build`);
+  if (!built(i)) return toast(`${ROUTE[i].short}: coming soon`);
   const prev = cur; cur = i; sel = null; const st = ROUTE[i];
+  if (msg.unplug && st.id !== 'send-1'){ msg.unplug = false; setPlug(); if (!instant) toast('Cable plugged back in'); }
   if (location.hash.slice(1) !== st.id) history.replaceState(null, '', '#' + st.id);
   moveCamera(st, instant);
   const wide = st.kind === 'intro', lbls = [SEND.label, RECV.label, ...NETLABELS], o0 = lbls[0].material.opacity, o1 = wide ? 1 : 0;
   if (instant) lbls.forEach(l => l.material.opacity = o1); else tween(.6, e => lbls.forEach(l => l.material.opacity = o0 + (o1 - o0)*e));
-  const ly = (st.kind === 'send' ? st.layer - 1 : 6)*FH - .2, y0 = lift.position.y;
-  if (instant) lift.position.y = ly; else tween(1.5, e => lift.position.y = y0 + (ly - y0)*easeIO(e));
-  const srcs = { 7:ANIM.src7, 6:ANIM.src6, 4:ANIM.src4 };
-  wait(instant ? 0 : (prev === i ? 0 : 1.1), () => { setParcel(pduFor(st, model(msg)), st.kind === 'send' && srcs[st.layer] ? srcs[st.layer]() : null); const c = CONTENT[st.id]; if (c.arrive) c.arrive(); });
+  const ls = liftY(st.kind === 'send' ? st.layer : i < sendIdx(7) ? 7 : 1), lr = liftY(st.kind === 'recv' ? st.layer : 1);
+  for (const [L, y1] of [[SEND.lift, ls], [RECV.lift, lr]]){ const y0 = L.position.y; if (instant) L.position.y = y1; else if (y0 !== y1) tween(1.5, e => L.position.y = y0 + (y1 - y0)*easeIO(e)); }
+  pulseCurve = curveFor(st);
+  relocate(holderFor(st), instant);
+  wait(instant ? 0 : (prev === i ? 0 : 1.1), () => arrive(st));
   renderPanel(); renderRail();
   const ch = document.getElementById('chip'); ch.querySelector('i').style.background = colorOf(st);
-  ch.querySelector('span').textContent = `${i}/${ROUTE.length - 1} · ${st.kind === 'intro' ? 'Overview' : kickerOf(st).split(' · ')[0] + ' · ' + st.short}`;
+  ch.querySelector('span').textContent = `${i}/${ROUTE.length - 1} · ${st.kind === 'intro' ? 'Overview' : (st.kind === 'send' ? 'Laptop' : st.kind === 'recv' ? 'Server' : 'Network') + ' · ' + st.short}`;
 }
 function refresh(){ // the message changed (path, protocol, peek): update the words, the block row and the screens
-  const st = ROUTE[cur]; renderMsg(); setParcel(pduFor(st, model(msg)), null); drawScreen(); drawSeq();
-  const c = CONTENT[st.id]; if (c.steps) document.getElementById('steps').innerHTML = c.steps(model(msg)).map(s => `<li>${s}</li>`).join('');
-  if (c.extra) document.getElementById('extra').innerHTML = c.extra(model(msg));
+  const st = ROUTE[cur], c = CONTENT[st.id], M = model(msg); renderMsg();
+  if (holderFor(st)) setParcel(leaveFor(st, M), null);
+  drawScreen(); drawSeq('s4'); drawSeq('r4'); crcScreen('s'); crcScreen('r');
+  if (c.steps) document.getElementById('steps').innerHTML = c.steps(M).map(s => `<li>${s}</li>`).join('');
+  if (c.extra) document.getElementById('extra').innerHTML = c.extra(M);
   document.querySelectorAll('.try [aria-pressed]').forEach(b => b.setAttribute('aria-pressed', b.id === 'peek' ? msg.peek : b.id === msg.proto));
 }
 function renderPanel(){
@@ -565,28 +963,31 @@ function renderPanel(){
   const body = document.getElementById('panelBody'); body.innerHTML = h; body.parentElement.scrollTop = 0;
   if (c.tryit && c.tryit.bind) c.tryit.bind();
   renderMsg();
-  const nx = ROUTE[cur + 1], pv = ROUTE[cur - 1], nxOk = nx && built(cur + 1);
+  const nx = ROUTE[cur + 1], pv = ROUTE[cur - 1];
   document.getElementById('nav').innerHTML = `<button class="btn" id="prev" ${pv ? '' : 'disabled'}>Back</button>`
-    + `<button class="btn next" id="next" ${nxOk ? '' : 'disabled'}>${nx ? (nxOk ? `Next: ${nx.short} &rarr;` : `Next: ${nx.short} (coming soon)`) : 'The end'}</button>`;
-  document.getElementById('prev').onclick = () => go(cur - 1); document.getElementById('next').onclick = () => go(cur + 1);
+    + (nx ? `<button class="btn next" id="next">Next: ${nx.short} &rarr;</button>` : `<button class="btn next" id="next">Start again</button>`);
+  document.getElementById('prev').onclick = () => go(cur - 1); document.getElementById('next').onclick = () => go(nx ? cur + 1 : 0);
 }
 function renderMsg(){
   const box_ = document.getElementById('msg'); if (!box_) return;
   const st = ROUTE[cur], c = CONTENT[st.id], M = model(msg), list = pduFor(st, M), total = list.reduce((a, b) => a + b.bytes, 0);
-  if (!sel || !list.some(b => b.key === sel)) sel = c.focus || list[0].key;
+  if (!sel || !list.some(b => b.key === sel)) sel = c.focus && list.some(b => b.key === c.focus) ? c.focus : list[0].key;
   const H = headerOf(sel, M, st), tint = {}; H.fields.forEach(([f], i) => tint[f] = TINTS[i % TINTS.length]);
   let bytes = '';
   for (const [f, v] of H.parts){
     if (H.view === 'text'){ const t = esc(v).replace(/\r\n/g, '<em>\\r\\n</em>\n'); bytes += f ? `<span data-f="${f}" style="--t:${tint[f]}">${t}</span>` : `<span class="sep">${t}</span>`; }
     else { const show = v.slice(0, 16).map(hex).join(' '); bytes += `<span data-f="${f}" style="--t:${tint[f]}">${show}</span>${v.length > 16 ? `<span class="more"> … +${v.length - 16} bytes</span>` : ''} `; }
   }
-  box_.innerHTML = `<h3>The message now <span class="n">· ${total} bytes</span></h3>`
-    + `<div class="pdu">${list.map(b => `<button class="blk${b.enc ? ' enc' : ''}${b.key === sel ? ' on' : ''}" data-k="${b.key}" style="--c:${b.cream ? '#fbf7ea' : LCOL[b.layer]};flex-grow:${blockW(b).toFixed(2)}"><b>${b.label}</b><small>${b.bytes} B</small></button>`).join('')}</div>`
+  const gone = list.filter(b => b.gone);
+  box_.innerHTML = `<h3>${st.kind === 'recv' ? 'The message arriving' : 'The message now'} <span class="n">· ${total} bytes</span></h3>`
+    + `<div class="pdu">${list.map(b => `<button class="blk${b.enc ? ' enc' : ''}${b.gone ? ' gone' : ''}${b.key === sel ? ' on' : ''}" data-k="${b.key}" style="--c:${b.cream ? '#fbf7ea' : LCOL[b.layer]};flex-grow:${blockW(b).toFixed(2)}"><b>${b.label}</b><small>${b.bytes} B</small></button>`).join('')}</div>`
+    + (gone.length ? `<p class="leaves">Dashed: removed on this floor (${gone.map(b => b.label).join(' and ')}). It leaves with ${total - gone.reduce((a, b) => a + b.bytes, 0)} bytes.</p>` : '')
+    + (c.leaves ? `<p class="leaves">${c.leaves(M)}</p>` : '')
     + (c.unchanged ? `<p class="cap"><b style="color:var(--ink)">${c.unchanged}</b></p>` : '')
     + `<p class="cap">${H.cap}</p><div class="bytes">${bytes.trim()}</div>`
     + (H.peek ? `<p class="cap">Decrypted, it says:</p><div class="bytes">${esc(H.peek).replace(/\r\n/g, '<em>\\r\\n</em>\n')}</div>` : '')
     + `<div class="flds">${H.fields.map(([f, v, d]) => `<div class="fld" data-f="${f}"><div class="fh"><i style="--t:${tint[f]}"></i><b>${f}</b><code>${esc(v)}</code></div><p>${d}</p></div>`).join('')}</div>`
-    + `<p class="cap">Tap a block above to see its fields.</p>`;
+    + (list.length > 1 ? `<p class="cap">Tap a block above to see its fields.</p>` : '');
   box_.querySelectorAll('.blk').forEach(b => b.onclick = () => { sel = b.dataset.k; renderMsg(); });
   const hl = (f, on) => box_.querySelectorAll(`[data-f="${CSS.escape(f)}"]`).forEach(x => x.classList.toggle('hl', on));
   box_.querySelectorAll('[data-f]').forEach(x => { x.onmouseenter = () => hl(x.dataset.f, true); x.onmouseleave = () => hl(x.dataset.f, false); });
@@ -594,26 +995,24 @@ function renderMsg(){
 function renderRail(){
   const el = document.getElementById('rail'), W = Math.max(320, el.clientWidth - 20), n = ROUTE.length, pad = 26, H = 84;
   const X = i => pad + i*(W - 2*pad)/(n - 1), Y = st => st.kind === 'intro' ? 10 : st.layer ? 12 + (7 - st.layer)*7 : 61;
-  const pts = ROUTE.map((st, i) => [X(i), Y(st)]);
+  const pts = ROUTE.map((st, i) => [X(i), Y(st)]), sm = (W - 2*pad)/(n - 1) < 30;
   let s = `<svg viewBox="0 0 ${W} ${H}" aria-label="Route map">`;
-  const grp = [['LAPTOP', 1, 7], ['NETWORK', 8, 11], ['SERVER', 12, 18]];
-  for (const [t, a, b] of grp) s += `<text x="${(X(a) + X(b))/2}" y="${H - 1}" text-anchor="middle" fill="#7a7263" letter-spacing="1.5">${t}</text>`;
+  for (const [t, a, b] of [['LAPTOP', 1, 7], ['NETWORK', 8, 11], ['SERVER', 12, 18]]) s += `<text x="${(X(a) + X(b))/2}" y="${H - 1}" text-anchor="middle" fill="#7a7263" letter-spacing="1.5">${t}</text>`;
   s += `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="#c9c1b0" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`;
   s += `<polyline points="${pts.slice(0, cur + 1).map(p => p.join(',')).join(' ')}" fill="none" stroke="#231e16" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`;
-  const sm = (W - 2*pad)/(n - 1) < 30;
   ROUTE.forEach((st, i) => { const [x, y] = pts[i], on = i === cur, ok = built(i), r = sm ? (on ? 7 : 5) : (on ? 10 : 7.5);
     const txt = st.kind === 'intro' ? '' : st.layer ? st.layer : st.kind === 'switch' ? 'S' : st.kind === 'router' ? 'R' : '';
-    s += `<g class="dot${ok ? '' : ' off'}" data-i="${i}"><title>${esc(kickerOf(st))}: ${esc(st.short)}${ok ? '' : ' (coming soon)'}</title>`
+    s += `<g class="dot${ok ? '' : ' off'}" data-i="${i}"><title>${esc(kickerOf(st))}: ${esc(st.short)}</title>`
       + `<circle cx="${x}" cy="${y}" r="${r + 6}" fill="transparent"/>`
       + `<circle cx="${x}" cy="${y}" r="${r}" fill="${ok ? colorOf(st) : '#f2efe7'}" stroke="#231e16" stroke-width="${on ? 2.6 : 1.6}" ${ok ? '' : 'stroke-dasharray="2.5 2.5"'}/>`
       + (on ? `<circle cx="${x}" cy="${y}" r="${r + (sm ? 3 : 4.5)}" fill="none" stroke="#231e16" stroke-width="1.5"/>` : '')
-      + (txt !== '' && !sm ? `<text x="${x}" y="${y + 3.5}" text-anchor="middle" fill="${st.kind === 'intro' || !ok ? '#7a7263' : '#231e16'}">${txt}</text>` : '') + `</g>`; });
+      + (txt !== '' && !sm ? `<text x="${x}" y="${y + 3.5}" text-anchor="middle" fill="#231e16">${txt}</text>` : '') + `</g>`; });
   el.innerHTML = s + '</svg>';
   el.querySelectorAll('.dot').forEach(d => d.onclick = () => go(+d.dataset.i));
 }
 let toastT = 0;
 function toast(t){ const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 1800); }
-addEventListener('keydown', e => { if (/input|textarea/i.test(e.target.tagName)) return;
+addEventListener('keydown', e => { if (/input|textarea|select/i.test(e.target.tagName)) return;
   if (['ArrowRight', 'PageDown', ' '].includes(e.key)){ e.preventDefault(); go(cur + 1); }
   else if (['ArrowLeft', 'PageUp'].includes(e.key)){ e.preventDefault(); go(cur - 1); }
   else if (e.key === 'Home') go(0); });
@@ -624,8 +1023,8 @@ function resize(){ const w = stage.clientWidth, h = stage.clientHeight; if (!w |
 new ResizeObserver(resize).observe(stage);
 let last = performance.now();
 function frame(now){ const dt = Math.min(.12, (now - last)/1000); last = now;
-  for (let i = anims.length - 1; i >= 0; i--){ const a = anims[i]; a.t += dt; const k = Math.min(1, a.t/a.dur); a.fn(k); if (k >= 1){ anims.splice(i, 1); if (a.done) a.done(); } }
-  applyCamera(); renderer.render(scene3, camera); requestAnimationFrame(frame); }
+  for (let i = anims.length - 1; i >= 0; i--){ const a = anims[i]; a.t += dt; const k = a.dur > 0 ? Math.min(1, a.t/a.dur) : 1; a.fn(k); if (k >= 1){ anims.splice(i, 1); if (a.done) a.done(); } }
+  updatePulses(now/1000); updateLeds(now); applyCamera(); renderer.render(scene3, camera); requestAnimationFrame(frame); }
 resize();
 go(Math.max(0, ROUTE.findIndex(s => s.id === location.hash.slice(1))), true);
 requestAnimationFrame(frame);
