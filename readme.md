@@ -68,6 +68,15 @@ scripts/record_gif.js     re-records docs/journey.gif (needs Playwright and ffmp
                           python3 scripts/build_site.py && node scripts/record_gif.js
 ```
 
+## Look
+
+The drawing style is [Colorfigures](https://april-zhu.com/colorfigures) (the skill vendored in
+`.claude/skills/colorfigures`) carried into 3D: every colour has three flat tones (light, mid, dark) picked by a light
+that stays put relative to the viewer; heavy ink silhouettes and finer inner lines; a gentle hand-drawn wobble and paper
+grain; and a flat blue cast shadow on a wooden desk board. The ink, wobble and grain are one full-screen pass over the
+rendered scene (`INK_PASS` in `src/index.html`).
+
 ## Credits
 
-3D by [three.js](https://threejs.org) (MIT License, `src/vendor/three.LICENSE`).
+3D by [three.js](https://threejs.org) (MIT License, `src/vendor/three.LICENSE`). Drawing style from
+[Colorfigures](https://april-zhu.com/colorfigures) by April Zhu (MIT).

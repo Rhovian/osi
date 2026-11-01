@@ -3,10 +3,11 @@
 # build). Run this only when the page starts using a part of three.js that is not in NAMES. Needs Node and npm.
 set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-NAMES="BoxGeometry BufferGeometry CanvasTexture CatmullRomCurve3 Color ConeGeometry CylinderGeometry DataTexture
-DirectionalLight DoubleSide EdgesGeometry Group HemisphereLight Line LineBasicMaterial LineSegments Mesh
-MeshBasicMaterial MeshToonMaterial NearestFilter PCFSoftShadowMap PerspectiveCamera PlaneGeometry RedFormat Scene
-SphereGeometry Spherical Sprite SpriteMaterial SRGBColorSpace TorusGeometry TubeGeometry Vector3 WebGLRenderer"
+NAMES="BoxGeometry BufferGeometry CanvasTexture CatmullRomCurve3 Color ConeGeometry CylinderGeometry DepthTexture
+DirectionalLight DoubleSide EdgesGeometry Group HalfFloatType Line LineBasicMaterial LineSegments Mesh
+MeshBasicMaterial OrthographicCamera PCFShadowMap PerspectiveCamera PlaneGeometry SRGBColorSpace Scene
+ShaderMaterial ShadowMaterial SphereGeometry Spherical Sprite SpriteMaterial TorusGeometry TubeGeometry
+Vector2 Vector3 WebGLRenderTarget WebGLRenderer"
 WORK="$(mktemp -d)"; cd "$WORK"
 npm init -y >/dev/null
 npm install --silent --no-audit --no-fund three@0.158.0 esbuild@0.24.0
