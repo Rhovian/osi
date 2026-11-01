@@ -96,8 +96,13 @@
   .out{margin-top:8px;font-size:13.5px;background:#fff;border:1px solid var(--rule);border-radius:8px;padding:8px 10px}
   .try select{font:14px ui-monospace,Menlo,monospace;padding:7px 8px;border:1.5px solid var(--ink);border-radius:8px;background:#fff;width:100%}
   .leaves{font-size:13.5px;margin:6px 0 0}
+  .analogy{margin:-2px 0 14px;font-size:14.5px;line-height:1.45;color:#4b4438;padding:2px 0 2px 11px;border-left:4px solid var(--c,#c9c1b0)}
+  .analogy b{font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:1px}
+  .legend{display:flex;gap:3px;margin:6px 0 4px}
+  .legend span{flex:1 1 auto;border:1.5px solid var(--ink);border-radius:6px;padding:3px 2px;text-align:center;font:800 10.5px ui-monospace,Menlo,monospace;background:var(--c)}
+  .legend span.enc{background:repeating-linear-gradient(135deg,var(--c) 0 5px,color-mix(in srgb,var(--c) 70%,#fff) 5px 10px)}
   @media (max-width:860px){
-    .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 40vh minmax(0,1fr) auto}
+    .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 45vh minmax(0,1fr) auto}
     header{grid-column:1} header span{display:none}
     #panel{border-left:0;border-top:1px solid var(--rule)}
     #rail{grid-column:1}
@@ -165,9 +170,10 @@ const ROUTE = [
   { id:'cable-1', kind:'wire', layer:0, short:'Cable' }, { id:'switch', kind:'switch', layer:0, short:'Switch' },
   { id:'router', kind:'router', layer:0, short:'Router' }, { id:'cable-2', kind:'wire', layer:0, short:'Cable' },
   ...[1, 2, 3, 4, 5, 6, 7].map(n => ({ id:'recv-' + n, kind:'recv', layer:n, short:LAYER[n] })),
+  { id:'reply', kind:'reply', short:'The reply', layer:8 },
 ];
-const colorOf = st => st.kind === 'intro' ? '#231e16' : LCOL[st.layer] || LCOL[0];
-const kickerOf = st => st.kind === 'intro' ? 'Start here' : st.kind === 'send' ? `Laptop · Layer ${st.layer}` : st.kind === 'recv' ? `Server · Layer ${st.layer}` : 'On the network';
+const colorOf = st => st.kind === 'intro' || st.kind === 'reply' ? '#231e16' : LCOL[st.layer] || LCOL[0];
+const kickerOf = st => st.kind === 'intro' ? 'Start here' : st.kind === 'reply' ? 'The way back' : st.kind === 'send' ? `Laptop · Layer ${st.layer}` : st.kind === 'recv' ? `Server · Layer ${st.layer}` : 'On the network';
 const hopOf = st => (st.kind === 'send' || st.id === 'cable-1' || st.kind === 'switch') ? 'A' : 'B';
 
 /* small tables and pictures used by several stops */
@@ -179,6 +185,53 @@ const RTDST = [
 const ROUTES = [['10.0.0.0/24', 'directly connected', 'eth0'], ['10.0.1.0/24', 'directly connected', 'eth1'], ['0.0.0.0/0', 'via 203.0.113.1', 'eth2']];
 const MACT = [['1', MAC.laptop, 'laptop'], ['2', 'a8:5e:45:31:7c:02', 'printer'], ['3', 'f0:18:98:44:12:9e', 'desk PC'], ['4', MAC.rtA, 'router']];
 let l3sel = 0, rtsel = 0, macForgot = false;
+/* the same journey in everyday terms: posting a letter */
+const ANALOGY = {
+  'start':'It works much like the post. Going out, each step adds its own label; coming in, each step reads its label and takes it off.',
+  'send-7':'Writing the letter.',
+  'send-6':'Locking the letter in a box that only the recipient has a key for.',
+  'send-5':'Keeping the thread of an ongoing correspondence, so you do not introduce yourself in every letter.',
+  'send-4':'Numbering the pages, and adding the flat number so it reaches the right person in the building.',
+  'send-3':'Writing the street address. It stays the same however many post offices handle the letter.',
+  'send-2':'A label for the next leg only: "to the local sorting office". Every office along the way writes a new one.',
+  'send-1':'The van that carries it. It moves the parcel without reading anything on it.',
+  'cable-1':'The road.',
+  'switch':'The mailroom of your own building. It knows which desk is where, and nothing beyond the building.',
+  'router':'The sorting office. It reads the street address, throws away the old leg label and writes one for the next leg.',
+  'cable-2':'The next road.',
+  'recv-1':'The van arrives and unloads.',
+  'recv-2':'Checking the leg label is ours and the parcel is undamaged, then throwing the label away.',
+  'recv-3':'Checking the street address really is this building.',
+  'recv-4':'Finding the right flat, putting the pages in order, and sending back a "received" note.',
+  'recv-5':'Recognising which correspondence the letter belongs to.',
+  'recv-6':'Unlocking the box with the shared key, after checking nobody broke the seal.',
+  'recv-7':'Reading the letter, and writing back.',
+  'reply':'The answer is posted back the same way, with sender and recipient swapped.',
+};
+function pduName(st, M){ const n = st.layer, l4 = M.proto === 'tcp' ? 'TCP segment' : 'UDP datagram';
+  if (st.kind === 'send') return ({ 7:'data', 6:'encrypted data', 5:'encrypted data', 4:l4, 3:'IP packet', 2:'Ethernet frame', 1:'bits on the wire' })[n];
+  if (st.kind === 'recv') return ({ 1:'bits on the wire', 2:'Ethernet frame', 3:'IP packet', 4:l4, 5:'encrypted data', 6:'encrypted data', 7:'data' })[n];
+  return st.kind === 'wire' ? 'bits on the wire' : st.kind === 'switch' || st.kind === 'router' ? 'Ethernet frame' : ''; }
+const RESP_LEN = 1180;   // HTTP/1.1 200 OK, a few headers and a small HTML page: fits in one segment
+// the reply's blocks once layer n has wrapped it on the way down the server; hop B = server's cable (TTL 64), A = laptop's cable (TTL 63)
+function respB(M, n, hop = 'B'){
+  const data = n >= 7 ? [{ key:'data', label:'RESPONSE', bytes:RESP_LEN, layer:7, cream:true }] : [{ key:'tls', label:'TLS', bytes:5, layer:6 }, { key:'data', label:'ENCRYPTED', bytes:RESP_LEN + 1, layer:6, enc:true }, { key:'tag', label:'TAG', bytes:16, layer:6 }];
+  const l4 = n <= 4 ? [{ key:'l4', label:M.l4.name, bytes:M.l4.len, layer:4 }] : [], ip = n <= 3 ? [{ key:'ip', label:'IP', bytes:20, layer:3, sub:`20 B · TTL ${hop === 'B' ? 64 : 63}` }] : [];
+  return n <= 2 ? [{ key:'eth', label:'ETH', bytes:14, layer:2, hop }, ...ip, ...l4, ...data, { key:'fcs', label:'FCS', bytes:4, layer:2, hop }] : [...ip, ...l4, ...data]; }
+function replyTable(M){ const rows = [['Source port', NET.sport, 443], ['Destination port', 443, NET.sport], ['Source IP', NET.laptop, NET.server], ['Destination IP', NET.server, NET.laptop],
+    ["Server's cable: MACs", `${MAC.rtB} to ${MAC.server}`, `${MAC.server} to ${MAC.rtB}`], ["Laptop's cable: MACs", `${MAC.laptop} to ${MAC.rtA}`, `${MAC.rtA} to ${MAC.laptop}`],
+    ['TCP acknowledgment', '1', String(1 + M.record.length)], ['TTL on arrival', '63', '63']];
+  return `<table class="cmp"><tr><th></th><th>Request</th><th>Reply</th></tr>${rows.map(([k, a, b]) => `<tr><td>${k}</td><td><code>${a}</code></td><td class="${String(a) === String(b) ? '' : 'chg'}"><code>${b}</code></td></tr>`).join('')}</table><p class="cap">Shaded: swapped or new. Every source becomes a destination, and the reply carries the server's acknowledgment of the request.</p>`; }
+function pairsSVG(){ const W = 400, PAIRS = [['#f08a2b', 'orange'], ['#43a565', 'green'], ['#3e86d9', 'blue'], ['#8a5a2c', 'brown']], T = (x, y, t, o = '') => `<text x="${x}" y="${y}" font-family="ui-monospace,Menlo,monospace" font-size="10" ${o}>${t}</text>`;
+  let s = `<svg class="wave" viewBox="0 0 ${W} 262">` + T(10, 16, 'FOUR TWISTED PAIRS, EACH TWISTED AT ITS OWN RATE', 'font-weight="700" fill="#7a7263"');
+  PAIRS.forEach(([c, name], i) => { const y0 = 38 + i*24, tw = 6 + i*1.5, wave = sg => { let d = ''; for (let x = 0; x <= 320; x += 2) d += (x ? 'L' : 'M') + (66 + x) + ' ' + (y0 + sg*5.5*Math.sin(x/320*tw*2*Math.PI)).toFixed(1); return d; };
+    s += `<path d="${wave(-1)}" stroke="#e2dccc" stroke-width="3.2" fill="none"/><path d="${wave(1)}" stroke="${c}" stroke-width="3.2" fill="none"/>` + T(10, y0 + 4, name, 'fill="#231e16" font-weight="700"'); });
+  s += T(10, 150, 'WHY TWIST? THE RECEIVER LOOKS ONLY AT THE DIFFERENCE', 'font-weight="700" fill="#7a7263"');
+  const sig = x => (Math.floor(x/16) % 2 ? 1 : -1), noise = x => 14*Math.exp(-Math.pow((x - 60)/7, 2)), plot = (x0, f, label, col) => { let d = ''; for (let x = 0; x <= 112; x += 2) d += (x ? 'L' : 'M') + (x0 + x) + ' ' + (210 - f(x)).toFixed(1);
+    return `<path d="M${x0} 210H${x0 + 112}" stroke="#e4ded0" stroke-dasharray="3 3"/><path d="${d}" stroke="${col}" stroke-width="2.2" fill="none" stroke-linejoin="round"/>` + T(x0, 254, label, 'fill="#231e16" font-weight="700"'); };
+  s += plot(10, x => 12*sig(x) + noise(x), 'wire A + noise', '#f08a2b') + plot(144, x => -12*sig(x) + noise(x), 'wire B + noise', '#b8ad94') + plot(278, x => 24*sig(x)*.8, 'A minus B: clean', '#7c5fc4');
+  s += T(58, 178, 'noise', 'fill="#c4452f"') + T(192, 178, 'same noise', 'fill="#c4452f"');
+  return s + '</svg>'; }
 function l3Decide(d){ const a = ip4(d.ip), net = [a[0], a[1], a[2], 0].join('.'), local = net === '10.0.0.0';
   return `<code>${d.ip}</code> AND <code>255.255.255.0</code> = <code>${net}</code><br>` + (local
     ? `Same network as the laptop (<code>10.0.0.0/24</code>): send it <b>straight to that device</b>, using ARP to find its MAC.`
@@ -212,6 +265,9 @@ const CONTENT = {
       <p>Going out, the request rides the lift <b>down</b> the laptop and every layer wraps it in a header of its own. It crosses the network as electrical signals, then rides <b>up</b> the server while each layer takes its header off again.</p>
       <h3>The seven layers</h3>
       <div class="layers">${[7, 6, 5, 4, 3, 2, 1].map(n => `<div><i style="--c:${LCOL[n]}">${n}</i><b>${LAYER[n]}</b><span>${({ 7:'what the app wants (HTTP)', 6:'encoding and encryption (TLS)', 5:'the ongoing conversation', 4:'which program, in order, nothing lost (TCP)', 3:'addresses across networks (IP)', 2:'to the next box on this wire (Ethernet)', 1:'bits as signals on a cable' })[n]}</span></div>`).join('')}</div>
+      <h3>How to read the picture</h3>
+      <div class="legend">${[['ETH', 2], ['IP', 3], ['TCP', 4], ['TLS', 6], ['REQUEST', 7], ['TAG', 6], ['FCS', 2]].map(([t, n]) => `<span style="--c:${t === 'REQUEST' ? '#fbf7ea' : LCOL[n]}">${t}</span>`).join('')}</div>
+      <p style="margin-top:4px">Every block is one header, coloured like the floor that wrote it. The cream block is the request itself. Watch blocks stack up on the way down and come off on the way up; a small tag pops up each time one is added or removed.</p>
       <h3>The cast</h3>
       <ul class="cast"><li>Laptop <code>${NET.laptop}</code></li><li>Switch, joining the devices in the laptop's office</li><li>Router <code>${NET.gw}</code> | <code>${NET.gw2}</code>, joining two networks</li><li>Server <code>${NET.server}</code>, called <code>${NET.host}</code></li></ul>
       <p class="hint">Press Next, use the arrow keys, or click a stop on the map at the bottom. Drag the picture to look around.</p>`,
@@ -339,6 +395,7 @@ const CONTENT = {
       `<b>Quick to arrive.</b> A signal covers about 20 cm per nanosecond in copper. Across a 30 m office cable that is about 150 ns, so around 150 bits are on the cable at any moment.`,
       `<b>Both directions at once.</b> The switch can talk back on the same pairs at the same time (full duplex), so nothing collides.`]; },
     focus:'pre',
+    extra: () => `<h3>Inside the cable</h3>${pairsSVG()}<p class="cap">Each pair carries a signal on one wire and its mirror image on the other. Noise from outside lands on both wires equally, so subtracting one from the other removes it.</p>`,
     note:'Fibre carries light instead of voltages, and Wi-Fi uses radio, but the frame and everything inside it stay the same. That is the point of layers.',
     who:'The cable itself: Cat 6 has four twisted pairs, each twisted at a slightly different rate so they do not interfere with each other.',
     tryit: { html: () => `<button class="btn" id="noise">Add a burst of noise</button><div class="out" id="noiseOut" hidden>A bit flipped on the way (the red pulse). Nobody can tell yet: the switch will recalculate the FCS, see it no longer matches, and silently drop the frame. Later, TCP on the laptop notices that no ACK came back and sends the data again.</div>`,
@@ -421,7 +478,7 @@ const CONTENT = {
     steps: M => M.proto === 'tcp' ? [
       `<b>Find the connection.</b> The four numbers ${NET.laptop}:${NET.sport} and ${NET.server}:443 identify exactly one connection, owned by the web server program.`,
       `<b>Check the order.</b> Sequence number 1 is the next byte it expected, so nothing is missing.`,
-      `<b>Acknowledge.</b> The server sends back an ACK for byte ${1 + M.record.length}: "I have everything up to here." That ACK makes the whole journey in reverse.`,
+      `<b>Acknowledge.</b> The server answers with ACK ${1 + M.record.length}: "I have bytes 1 to ${M.record.length}; send ${1 + M.record.length} next." It travels back inside the reply.`,
       `<b>Hand it up.</b> The TCP header comes off and the ${M.record.length} bytes join the connection's incoming stream.`] : [
       `<b>Find the program.</b> Port 443 belongs to the web server, so the datagram goes to it.`,
       `<b>No checks, no reply.</b> UDP sends no ACK. Had this datagram been lost, nobody at this layer would ever know.`,
@@ -430,7 +487,7 @@ const CONTENT = {
     who:"The server's kernel TCP code. The web server program then reads the bytes with an ordinary socket read.",
     tryit: { html: () => `<button class="btn" id="lose">Lose this segment instead</button><ol class="hs" id="lossList" hidden></ol>`,
       bind: () => { document.getElementById('lose').onclick = () => { const M = model(msg), ol = document.getElementById('lossList'); ol.hidden = false;
-        ol.innerHTML = (M.proto === 'tcp' ? ['The segment never arrives, so the server sends no ACK.', "The laptop's retransmission timer runs out (at least 200 ms on Linux).", 'The laptop sends the same bytes again, with the same sequence number 1.', `They arrive and the server ACKs ${1 + M.record.length}. The program above never noticed.`]
+        ol.innerHTML = (M.proto === 'tcp' ? ['The segment never arrives, so the server sends no ACK.', "The laptop's retransmission timer runs out (at least 200 ms on Linux).", 'The laptop sends the same bytes again, with the same sequence number 1.', `They arrive and the server sends ACK ${1 + M.record.length}. The web server program never noticed.`]
           : ['The datagram never arrives.', 'Nobody notices at this layer: there is no ACK and no timer.', 'It is up to the program, or QUIC on top, to ask again.']).map(t => `<li>${t}</li>`).join(''); playList('lossList', .9); }; } },
     arrive: () => stamp('r4'),
   },
@@ -458,16 +515,30 @@ const CONTENT = {
     arrive: () => spinRotors('r6'),
   },
   'recv-7': {
-    title:'Application', lead:'The web server reads GET / and writes its answer. The journey is complete.',
+    title:'Application', lead:'The web server reads GET / and writes its answer. The request has arrived.',
     steps: M => [
       `<b>Parse.</b> nginx reads the method (<code>GET</code>), the path (<code>${esc(M.path)}</code>) and the host (<code>${NET.host}</code>), and finds the page.`,
       `<b>Answer.</b> It writes a response, <code>HTTP/1.1 200 OK</code> followed by the page, and hands it down its own seven layers.`,
-      `<b>The way back.</b> The reply makes the same journey in reverse: down the server, a new frame at the router, up the laptop, where the browser draws the page.`],
+      `<b>The way back.</b> The reply makes the same journey in reverse. That is the next, and last, stop.`],
     focus:'data', extra: M => recap(M),
     who:'A web server program: nginx, Apache, Caddy, or an application framework.',
     tryit: { html: () => `<button class="btn" id="again">Start the journey again</button><p>Change the path on floor 7, or switch to UDP on floor 4, and follow the new bytes all the way through.</p>`,
       bind: () => { document.getElementById('again').onclick = () => go(1); } },
     arrive: () => serverLog(),
+  },
+  'reply': {
+    title:'The reply', lead:'The server answers, and the answer makes the whole journey back, in reverse.',
+    steps: M => [
+      `<b>Down the server.</b> nginx writes <code>HTTP/1.1 200 OK</code> and a ${RESP_LEN.toLocaleString('en')}-byte page. TLS encrypts it with the server's own key, ${M.proto === 'tcp' ? `TCP numbers it and carries the ACK for our request in the same segment` : 'UDP adds its 8 bytes'}, and IP addresses it to <code>${NET.laptop}</code>.`,
+      `<b>Out of the server.</b> The laptop is not on the server's network, so the frame goes to the server's gateway: the router's eth1, <code>${NET.gw2}</code>.`,
+      `<b>Through the router.</b> The same steps, mirrored: frame off, TTL down by one, a new frame for the laptop's cable. The IP addresses ride through untouched.`,
+      `<b>Up the laptop.</b> Each floor checks and removes its header. TLS decrypts with the session key, and the browser receives the HTML and draws the page.`,
+      `<b>And again.</b> The page mentions images and styles, so the browser sends more requests, usually over this same connection. Each one makes this whole journey.`],
+    extra: M => `<h3>Request and reply, side by side</h3>${replyTable(M)}`,
+    note:'The whole round trip on an office network takes well under a millisecond. Across the internet it is usually 10 to 100 ms, almost all of it spent travelling between routers.',
+    tryit: { html: () => `<button class="btn" id="replayBtn">Play the reply again</button><p>Or press Next to start the journey from the beginning.</p>`,
+      bind: () => { document.getElementById('replayBtn').onclick = () => playReply(); } },
+    arrive: () => playReply(),
   },
 };
 const HS = [['laptop', 'ClientHello', '"I speak TLS 1.3. Here is my half of a key exchange."'], ['server', 'ServerHello', '"Agreed. Here is my half." Both now compute the same secret keys.'],
@@ -634,6 +705,15 @@ const CURVE = {
   3: tube([[5.14, .29, 7.42], [5.4, .12, 8.05], [7.8, .12, 6.4], [JR - 1, .12, 1.3], [JR - .5, .45, -.2], [JR, .76, -.2]]),
 };
 const NETLABELS = [SW.lab, RT.lab];
+const ROUTELINE = (() => { const g = new THREE.Group(), v = (x, y, z) => new THREE.Vector3(x, y, z), up = .32, z = LIFTZ + .95;
+  const pts = [v(SX, TOP - .6, z), v(SX, 6, z), v(SX, 1.0, z), v(SX + 2.6, .55, z), v(JS + .4, .5, 1.6),
+    ...CURVE[1].getSpacedPoints(14).slice(4).map(p => p.clone().setY(p.y + up)), ...CURVE[2].getSpacedPoints(10).slice(1, -1).map(p => p.clone().setY(p.y + up)),
+    ...CURVE[3].getSpacedPoints(14).slice(0, -4).map(p => p.clone().setY(p.y + up)), v(JR - .4, .5, 1.6), v(RX - 2.6, .55, z), v(RX, 1.0, z), v(RX, 6, z), v(RX, TOP - .6, z)];
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal'), m = new THREE.MeshBasicMaterial({ color:0xf4b829, transparent:true, opacity:.95 });
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 300, .09, 8), m));
+  for (const u of [.12, .3, .5, .7, .88]){ const c = new THREE.Mesh(new THREE.ConeGeometry(.42, .9, 14), m), t = curve.getTangentAt(u);
+    c.position.copy(curve.getPointAt(u)); c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), t); g.add(c); }
+  world.add(g); return g; })();
 function drawMacTable(){ SW.tex.redraw((g, w, h) => { g.fillStyle = '#fbf9f3'; g.fillRect(0, 0, w, h); g.fillStyle = '#231e16'; g.font = `800 34px ${MONO}`; g.fillText('MAC TABLE', 26, 50);
   g.font = `600 22px ${MONO}`; g.fillStyle = '#7a7263'; g.fillText('PORT  MAC ADDRESS        DEVICE', 26, 92);
   (macForgot ? MACT.slice(0, 1) : MACT).forEach((r, i) => { const y = 140 + i*58; if (i === 0 || i === 3){ g.fillStyle = '#fff1bf'; g.fillRect(16, y - 38, w - 32, 52); }
@@ -762,6 +842,9 @@ function drawScreen(){ const M = model(msg), A = ANIM.s7, k = A.typed;
   A.tex.redraw((g, w, h) => { g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, w, h); g.fillStyle = '#e4e0d6'; g.fillRect(0, 0, w, 58);
     ['#ef6a4c', '#f2c94c', '#8fd0a6'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(26 + i*26, 29, 8, 0, 7); g.fill(); });
     rr(g, 100, 12, w - 116, 34, 17); g.fillStyle = '#fff'; g.fill(); g.fillStyle = '#231e16'; g.font = `600 22px ${MONO}`; g.fillText(NET.host + M.path, 116, 37);
+    if (A.page){ g.fillStyle = '#231e16'; g.font = `800 38px ${MONO}`; g.fillText('Team wiki', 26, 112); g.fillStyle = '#6cc3cf'; g.fillRect(w - 170, 82, 144, 100);
+      g.fillStyle = '#fbfbf8'; g.font = `700 20px ${MONO}`; g.fillText('200 OK', w - 140, 140); for (let i = 0; i < 5; i++){ g.fillStyle = '#d9d4c7'; g.fillRect(26, 140 + i*30, (i % 3 === 2 ? 180 : 290) - (i === 4 ? 90 : 0), 13); }
+      g.fillStyle = '#ef6a4c'; g.fillRect(26, 300, 120, 14); return; }
     const lines = [`GET ${M.path} HTTP/1.1`, `Host: ${NET.host}`], total = lines.join('').length; let left = Math.round(total*k);
     g.font = `700 30px ${MONO}`; lines.forEach((ln, i) => { g.fillStyle = '#231e16'; g.fillText(ln.slice(0, Math.max(0, left)), 26, 130 + i*48); left -= ln.length; }); }); }
 function serverLog(k = 0){ const M = model(msg), A = ANIM.r7;
@@ -806,22 +889,30 @@ function makeBlock(b){ const w = blockW(b), side = mat(b.cream ? 0xfbf7ea : C(b.
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, .56, .6), [side, side, side, side, front, front]); ink(m); m.castShadow = true; m.userData = { ...b, w }; return m; }
 function flyAway(m, sink){ const p0 = m.position.clone(), s0 = m.scale.x, to = sink ? parcel.worldToLocal(sink.clone()) : null;
   tween(to ? .8 : .4, e => { if (to) m.position.set(p0.x + (to.x - p0.x)*e, p0.y + (to.y - p0.y)*e + Math.sin(Math.PI*e)*1.2, p0.z + (to.z - p0.z)*e); m.scale.setScalar(s0*(1 - .85*e)); }, () => m.parent && m.parent.remove(m)); }
-function setParcel(list, src, sink){
+function callout(text, pos, layer){ const bg = layer ? LCOL[layer] : '#fbf9f3';
+  const tex = canvasTex(380, 100, (g, w, h) => { rr(g, 6, 6, w - 12, h - 12, 40); g.fillStyle = bg; g.fill(); g.lineWidth = 6; g.strokeStyle = '#231e16'; g.stroke(); g.fillStyle = '#231e16'; g.font = `800 42px ${MONO}`; g.textAlign = 'center'; g.fillText(text, w/2, 65); });
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); sp.scale.set(1.5, .395, 1); sp.renderOrder = 12; sp.position.copy(pos); world.add(sp);
+  const y0 = pos.y; tween(2.2, e => { sp.position.y = y0 + .8*e; sp.material.opacity = e < .7 ? 1 : 1 - (e - .7)/.3; }, () => { world.remove(sp); tex.dispose(); sp.material.dispose(); }); }
+function setParcel(list, src, sink, announce = false){
   scene3.updateMatrixWorld();
+  if (list.filter(b => !blocks.has(b.key)).length > 2) announce = false;   // a jump straight to a stop: no pile of tags
+  const tag = (t, cx, layer) => announce && parcel.parent && callout(t, parcel.localToWorld(new THREE.Vector3(cx, .95, 0)), layer);
   const ws = list.map(blockW), gap = .1, tot = ws.reduce((a, b) => a + b, 0) + gap*Math.max(0, list.length - 1);
   parcel.scale.setScalar(Math.min(1, 7/Math.max(tot, .01))); parcel.updateMatrixWorld();
   let x = -tot/2; const keep = new Set();
   list.forEach((b, i) => { const cx = x + ws[i]/2; x += ws[i] + gap; keep.add(b.key);
     let m = blocks.get(b.key);
-    if (m && m.userData.hop !== b.hop){ flyAway(m, sink); blocks.delete(b.key); m = null; }
-    if (m && sigOf(m.userData) !== sigOf(b)){ const old = m; m = makeBlock(b); m.position.copy(old.position); parcel.remove(old); parcel.add(m); blocks.set(b.key, m); }
-    if (!m){ m = makeBlock(b); blocks.set(b.key, m); parcel.add(m);
+    let fresh = false;
+    if (m && m.userData.hop !== b.hop){ flyAway(m, sink); blocks.delete(b.key); m = null; fresh = true; tag('new ' + b.label, cx, b.layer); }
+    if (m && sigOf(m.userData) !== sigOf(b)){ const old = m; m = makeBlock(b); m.position.copy(old.position); parcel.remove(old); parcel.add(m); blocks.set(b.key, m);
+      tag(b.key === 'ip' ? b.sub.split('· ')[1] : b.key === 'data' ? (b.enc ? 'encrypted' : 'decrypted') : b.label, cx, b.layer); }
+    if (!m){ m = makeBlock(b); blocks.set(b.key, m); parcel.add(m); if (!fresh) tag(`+ ${b.label} ${b.bytes} B`, cx, b.layer);
       const from = src ? parcel.worldToLocal(src.clone()) : new THREE.Vector3(cx, 2.5, 0);
       m.position.copy(from); m.scale.setScalar(.2);
       tween(.9, e => { m.position.set(from.x + (cx - from.x)*e, from.y*(1 - e) + Math.sin(Math.PI*e)*1.4, from.z*(1 - e)); m.scale.setScalar(.2 + .8*e); });
     } else { const x0 = m.position.x, y0 = m.position.y, z0 = m.position.z; tween(.6, e => m.position.set(x0 + (cx - x0)*e, y0*(1 - e), z0*(1 - e))); }
   });
-  for (const [key, m] of blocks) if (!keep.has(key)){ blocks.delete(key); flyAway(m, sink); }
+  for (const [key, m] of blocks) if (!keep.has(key)){ blocks.delete(key); tag(`- ${m.userData.label}`, m.position.x, m.userData.layer); flyAway(m, sink); }
 }
 function relocate(holder, instant){
   if (parcel.parent === holder || (!holder && !parcel.parent)) return;
@@ -833,10 +924,10 @@ function relocate(holder, instant){
 
 /* bits on the wire: a train of pulses along a cable (yellow = 1, dark = 0) */
 const PULSES = Array.from({ length:16 }, (_, i) => { const m = new THREE.Mesh(new THREE.SphereGeometry(.085, 10, 8), new THREE.MeshBasicMaterial({ color:i % 2 ? 0x2b3f6b : 0xffe066 })); m.visible = false; world.add(m); return m; });
-let pulseCurve = null, noiseUntil = 0;
+let pulseCurve = null, pulseDir = 1, noiseUntil = 0;
 function updatePulses(t){ const on = pulseCurve && !msg.unplug;
   PULSES.forEach((m, i) => { m.visible = !!on; if (!on) return; const u = ((t*.28 - i*.018) % 1.3 + 1.3) % 1.3; if (u > 1){ m.visible = false; return; }
-    const p = pulseCurve.getPointAt(u); m.position.set(p.x, p.y + .1, p.z); m.material.color.setHex(i === 7 && performance.now() < noiseUntil ? 0xe2483d : i % 2 ? 0x2b3f6b : 0xffe066); }); }
+    const p = pulseCurve.getPointAt(pulseDir > 0 ? u : 1 - u); m.position.set(p.x, p.y + .1, p.z); m.material.color.setHex(i === 7 && performance.now() < noiseUntil ? 0xe2483d : i % 2 ? 0x2b3f6b : 0xffe066); }); }
 
 /* tiny animation helpers */
 const anims = [];
@@ -877,26 +968,49 @@ function srcFor(st){ if (st.kind === 'send' || st.kind === 'recv'){ const A = AN
 const curveFor = st => ({ 'send-1':CURVE[1], 'cable-1':CURVE[1], 'switch':CURVE[2], 'router':CURVE[3], 'cable-2':CURVE[3], 'recv-1':CURVE[3] })[st.id] || null;
 function arrive(st){ const M = model(msg), c = CONTENT[st.id], here = () => ROUTE[cur] === st;
   if (!here()) return;
-  if (!holderFor(st)){ if (c.arrive) c.arrive(); return; }
-  if (st.kind === 'router'){ setParcel(frameB(M, 'A', false), PORT(RT, 0)); const top = W3(RT.g, 0, 1.4, 0); wait(1.3, () => { if (here()) setParcel(frameB(M, 'B', false), top(), top()); }); }
-  else if (st.kind === 'recv'){ setParcel(pduFor(st, M).map(b => ({ ...b, gone:false })), st.layer === 1 ? W3(RECV.floors[1], -RW/2 - .3, Y0 + .3, -.2)() : srcFor(st)); wait(1.1, () => { if (here()) setParcel(leaveFor(st, M), srcFor(st), srcFor(st)); }); }
-  else setParcel(pduFor(st, M), srcFor(st));
+  if (!holderFor(st) || st.kind === 'reply'){ if (c.arrive) c.arrive(); return; }
+  if (st.kind === 'router'){ setParcel(frameB(M, 'A', false), PORT(RT, 0)); const top = W3(RT.g, 0, 1.4, 0); wait(1.3, () => { if (here()) setParcel(frameB(M, 'B', false), top(), top(), true); }); }
+  else if (st.kind === 'recv'){ setParcel(pduFor(st, M).map(b => ({ ...b, gone:false })), st.layer === 1 ? W3(RECV.floors[1], -RW/2 - .3, Y0 + .3, -.2)() : srcFor(st)); wait(1.1, () => { if (here()) setParcel(leaveFor(st, M), srcFor(st), srcFor(st), true); }); }
+  else setParcel(pduFor(st, M), srcFor(st), null, st.kind === 'send');
   if (c.arrive) c.arrive(); }
 
 /* camera: each stop has a shot; the camera eases between shots, and you can drag to look around */
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 function shotFor(st){
   if (st.kind === 'intro') return { target:V(0, 6.5, 2), off:V(15, 19, 62) };
+  if (st.kind === 'reply') return { target:V(RX + .2, 7.4, 1), off:V(10, 4.5, 41) };
   if (st.kind === 'send' || st.kind === 'recv'){ const t = st.kind === 'recv' ? RECV : SEND; return { target:V(t.x + .2, (st.layer - 1)*FH + 1.0, 1.2), off:V(7.4, 1.6, 17) }; }
   if (st.kind === 'switch') return { target:V(SW.x, .9, 7.9), off:V(3.4, 3.4, 11) };
   if (st.kind === 'router') return { target:V(RT.x, 1.0, 7.9), off:V(3.4, 3.6, 11.5) };
   return st.id === 'cable-1' ? { target:V(-7.8, .6, 5), off:V(4, 5.5, 14) } : { target:V(8.6, .6, 5), off:V(-1, 5.5, 14.5) };
 }
 const cam = { target:V(0, 6.5, 2), off:V(15, 19, 62), yaw:0, pitch:0, zoom:1 };
-function moveCamera(st, instant){
-  const s = shotFor(st), t0 = cam.target.clone(), o0 = cam.off.clone(), y0 = cam.yaw, p0 = cam.pitch, z0 = cam.zoom;
+function moveCamera(st, instant){ moveShot(shotFor(st), instant ? 0 : 1.5); }
+let camTok = 0;
+function moveShot(s, dur){
+  const tk = ++camTok, instant = !dur, t0 = cam.target.clone(), o0 = cam.off.clone(), y0 = cam.yaw, p0 = cam.pitch, z0 = cam.zoom;
   if (instant){ cam.target.copy(s.target); cam.off.copy(s.off); cam.yaw = cam.pitch = 0; cam.zoom = 1; return; }
-  tween(1.5, e => { e = easeIO(e); cam.target.lerpVectors(t0, s.target, e); cam.off.lerpVectors(o0, s.off, e); cam.yaw = y0*(1 - e); cam.pitch = p0*(1 - e); cam.zoom = z0 + (1 - z0)*e; });
+  tween(dur, e => { if (tk !== camTok) return; e = easeIO(e); cam.target.lerpVectors(t0, s.target, e); cam.off.lerpVectors(o0, s.off, e); cam.yaw = y0*(1 - e); cam.pitch = p0*(1 - e); cam.zoom = z0 + (1 - z0)*e; });
+}
+let replyTok = 0;
+function playReply(){
+  const tok = ++replyTok, ok = () => tok === replyTok && ROUTE[cur].id === 'reply', M = model(msg), steps = []; let t = 0;
+  const at = (dt, fn) => { t += dt; steps.push([t, fn]); };
+  const ride = (L, n) => { const y0 = L.position.y, y1 = liftY(n); tween(.55, e => L.position.y = y0 + (y1 - y0)*easeIO(e)); };
+  const tower = x => ({ target:V(x + .2, 7.4, 1), off:V(10, 4.5, 41) });
+  ANIM.s7.page = false; drawScreen(); pulseCurve = null;
+  at(0, () => { moveShot(tower(RX), 1.4); relocate(RECV.lift, true); RECV.lift.position.y = liftY(7); serverLog(); });
+  at(1.4, () => setParcel(respB(M, 7), ANIM.r7.src(), null, true));
+  for (const n of [6, 5, 4, 3, 2, 1]) at(1.0, () => { ride(RECV.lift, n); wait(.5, () => { if (ok()) setParcel(respB(M, Math.max(n, 2)), ANIM['r' + n].src(), null, true); }); });
+  at(1.2, () => { relocate(null); moveShot({ target:V(0, .6, 6), off:V(2, 9, 27) }, 1.3); pulseDir = -1; pulseCurve = CURVE[3]; });
+  at(1.6, () => { pulseCurve = CURVE[2]; blinkPorts('rt', [0, 1]); });
+  at(1.6, () => { pulseCurve = CURVE[1]; blinkPorts('sw', [0, 3]); });
+  at(1.6, () => { pulseCurve = null; pulseDir = 1; moveShot(tower(SX), 1.4); relocate(SEND.lift, true); SEND.lift.position.y = liftY(1);
+    setParcel(respB(M, 2, 'A'), W3(SEND.floors[1], RW/2 + .3, Y0 + .6, -.2)(), null, false); });
+  for (const n of [2, 3, 4, 5, 6]) at(1.0, () => { ride(SEND.lift, n); wait(.5, () => { if (ok()) setParcel(respB(M, n + 1, 'A'), null, ANIM['s' + n].src(), true); }); });
+  at(1.0, () => { ride(SEND.lift, 7); moveShot(shotFor(ROUTE[sendIdx(7)]), 1.4); wait(.6, () => { if (ok()) setParcel([], null, ANIM.s7.src(), true); }); });
+  at(1.4, () => { ANIM.s7.page = true; drawScreen(); });
+  for (const [tt, fn] of steps) wait(tt, () => { if (ok()) fn(); });
 }
 function applyCamera(){
   const aspect = camera.aspect, fit = aspect < 1.25 ? Math.min(2.2, 1.25/aspect) : 1;
@@ -924,14 +1038,17 @@ function go(i, instant = false){
   moveCamera(st, instant);
   const wide = st.kind === 'intro', lbls = [SEND.label, RECV.label, ...NETLABELS], o0 = lbls[0].material.opacity, o1 = wide ? 1 : 0;
   if (instant) lbls.forEach(l => l.material.opacity = o1); else tween(.6, e => lbls.forEach(l => l.material.opacity = o0 + (o1 - o0)*e));
+  ROUTELINE.visible = st.kind === 'intro';
+  if (st.kind !== 'reply'){ replyTok++; pulseDir = 1; if (ANIM.s7.page){ ANIM.s7.page = false; drawScreen(); } }
   const ls = liftY(st.kind === 'send' ? st.layer : i < sendIdx(7) ? 7 : 1), lr = liftY(st.kind === 'recv' ? st.layer : 1);
-  for (const [L, y1] of [[SEND.lift, ls], [RECV.lift, lr]]){ const y0 = L.position.y; if (instant) L.position.y = y1; else if (y0 !== y1) tween(1.5, e => L.position.y = y0 + (y1 - y0)*easeIO(e)); }
+  if (st.kind !== 'reply') for (const [L, y1] of [[SEND.lift, ls], [RECV.lift, lr]]){ const y0 = L.position.y; if (instant) L.position.y = y1; else if (y0 !== y1) tween(1.5, e => L.position.y = y0 + (y1 - y0)*easeIO(e)); }
   pulseCurve = curveFor(st);
-  relocate(holderFor(st), instant);
-  wait(instant ? 0 : (prev === i ? 0 : 1.1), () => arrive(st));
+  if (st.kind !== 'reply') relocate(holderFor(st), instant);
+  wait(instant || st.kind === 'reply' ? 0 : (prev === i ? 0 : 1.1), () => arrive(st));
   renderPanel(); renderRail();
   const ch = document.getElementById('chip'); ch.querySelector('i').style.background = colorOf(st);
-  ch.querySelector('span').textContent = `${i}/${ROUTE.length - 1} · ${st.kind === 'intro' ? 'Overview' : (st.kind === 'send' ? 'Laptop' : st.kind === 'recv' ? 'Server' : 'Network') + ' · ' + st.short}`;
+  const pn = pduName(st, model(msg));
+  ch.querySelector('span').textContent = `${i}/${ROUTE.length - 1} · ${st.kind === 'intro' ? 'Overview' : st.kind === 'reply' ? 'The reply' : (st.kind === 'send' ? 'Laptop' : st.kind === 'recv' ? 'Server' : 'Network') + ' · ' + st.short}${pn ? ' · ' + pn : ''}`;
 }
 function refresh(){ // the message changed (path, protocol, peek): update the words, the block row and the screens
   const st = ROUTE[cur], c = CONTENT[st.id], M = model(msg); renderMsg();
@@ -944,6 +1061,7 @@ function refresh(){ // the message changed (path, protocol, peek): update the wo
 function renderPanel(){
   const st = ROUTE[cur], c = CONTENT[st.id], M = model(msg);
   let h = `<div class="kicker"><i style="background:${colorOf(st)}"></i>${kickerOf(st)}</div><h2>${c.title}</h2><p class="lead">${c.lead}</p>`;
+  if (ANALOGY[st.id]) h += `<p class="analogy" style="--c:${colorOf(st)}"><b>In everyday terms</b>${ANALOGY[st.id]}</p>`;
   if (c.body) h += c.body(M);
   if (c.steps) h += `<h3>What happens here</h3><ol class="steps" id="steps">${c.steps(M).map(s => `<li>${s}</li>`).join('')}</ol>`;
   if (pduFor(st, M).length) h += `<div id="msg"></div>`;
@@ -970,7 +1088,7 @@ function renderMsg(){
     else { const show = v.slice(0, 16).map(hex).join(' '); bytes += `<span data-f="${f}" style="--t:${tint[f]}">${show}</span>${v.length > 16 ? `<span class="more"> … +${v.length - 16} bytes</span>` : ''} `; }
   }
   const gone = list.filter(b => b.gone);
-  box_.innerHTML = `<h3>${st.kind === 'recv' ? 'The message arriving' : 'The message now'} <span class="n">· ${total} bytes</span></h3>`
+  box_.innerHTML = `<h3>${st.kind === 'recv' ? 'Arriving' : 'The message now'}: <span class="n">${pduName(st, M)}, ${total} bytes</span></h3>`
     + `<div class="pdu">${list.map(b => `<button class="blk${b.enc ? ' enc' : ''}${b.gone ? ' gone' : ''}${b.key === sel ? ' on' : ''}" data-k="${b.key}" style="--c:${b.cream ? '#fbf7ea' : LCOL[b.layer]};flex-grow:${blockW(b).toFixed(2)}"><b>${b.label}</b><small>${b.bytes} B</small></button>`).join('')}</div>`
     + (gone.length ? `<p class="leaves">Dashed: removed on this floor (${gone.map(b => b.label).join(' and ')}). It leaves with ${total - gone.reduce((a, b) => a + b.bytes, 0)} bytes.</p>` : '')
     + (c.leaves ? `<p class="leaves">${c.leaves(M)}</p>` : '')
@@ -985,14 +1103,14 @@ function renderMsg(){
 }
 function renderRail(){
   const el = document.getElementById('rail'), W = Math.max(320, el.clientWidth - 20), n = ROUTE.length, pad = 26, H = 84;
-  const X = i => pad + i*(W - 2*pad)/(n - 1), Y = st => st.kind === 'intro' ? 10 : st.layer ? 12 + (7 - st.layer)*7 : 61;
+  const X = i => pad + i*(W - 2*pad)/(n - 1), Y = st => st.kind === 'intro' || st.kind === 'reply' ? 10 : st.layer ? 12 + (7 - st.layer)*7 : 61;
   const pts = ROUTE.map((st, i) => [X(i), Y(st)]), sm = (W - 2*pad)/(n - 1) < 30;
   let s = `<svg viewBox="0 0 ${W} ${H}" aria-label="Route map">`;
-  for (const [t, a, b] of [['LAPTOP', 1, 7], ['NETWORK', 8, 11], ['SERVER', 12, 18]]) s += `<text x="${(X(a) + X(b))/2}" y="${H - 1}" text-anchor="middle" fill="#7a7263" letter-spacing="1.5">${t}</text>`;
+  for (const [t, a, b] of [['LAPTOP', 1, 7], ['NETWORK', 8, 11], ['SERVER', 12, 18], ['REPLY', 19, 19]]) s += `<text x="${(X(a) + X(b))/2}" y="${H - 1}" text-anchor="middle" fill="#7a7263" letter-spacing="1.5">${t}</text>`;
   s += `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="#c9c1b0" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`;
   s += `<polyline points="${pts.slice(0, cur + 1).map(p => p.join(',')).join(' ')}" fill="none" stroke="#231e16" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`;
   ROUTE.forEach((st, i) => { const [x, y] = pts[i], on = i === cur, ok = built(i), r = sm ? (on ? 7 : 5) : (on ? 10 : 7.5);
-    const txt = st.kind === 'intro' ? '' : st.layer ? st.layer : st.kind === 'switch' ? 'S' : st.kind === 'router' ? 'R' : '';
+    const txt = st.kind === 'intro' || st.kind === 'reply' ? '' : st.layer ? st.layer : st.kind === 'switch' ? 'S' : st.kind === 'router' ? 'R' : '';
     s += `<g class="dot${ok ? '' : ' off'}" data-i="${i}"><title>${esc(kickerOf(st))}: ${esc(st.short)}</title>`
       + `<circle cx="${x}" cy="${y}" r="${r + 6}" fill="transparent"/>`
       + `<circle cx="${x}" cy="${y}" r="${r}" fill="${ok ? colorOf(st) : '#f2efe7'}" stroke="#231e16" stroke-width="${on ? 2.6 : 1.6}" ${ok ? '' : 'stroke-dasharray="2.5 2.5"'}/>`

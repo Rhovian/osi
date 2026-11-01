@@ -84,9 +84,9 @@ Open `osi.html` in a browser (single file, no network). Source: `src/osi.html` +
 ## The Network Journey (`journey.html`)
 
 A step-by-step journey that follows one request (`GET /` from a laptop at 10.0.0.20 to `wiki.lan` at 10.0.1.7) down
-the laptop's seven layers, across a cable, a switch, a router and a second cable, and up the server's seven layers
-(18 stops). One control: Next / Back (arrow keys, or click a stop on the route map). Each stop shows a plain-language
-summary, the steps that happen, the real bytes at that point (click a header block, point at a field to find it in
+the laptop's seven layers, across a cable, a switch, a router and a second cable, up the server's seven layers, and
+back again as the reply, ending with the page drawn on the laptop (20 stops). One control: Next / Back (arrow keys, or click a stop on the route map). Each stop shows a plain-language
+summary, an "in everyday terms" postal analogy, the steps that happen, the real bytes at that point (click a header block, point at a field to find it in
 the hex), who does the work in real systems, and one "Try it":
 
 | Stop | Try it |
@@ -105,6 +105,10 @@ the hex), who does the work in real systems, and one "Try it":
 | Server 4 Transport | lose the segment: TCP retransmits, UDP doesn't |
 | Server 6 Presentation | tamper with one byte: TLS tag check fails |
 | Server 7 Application | start again |
+| The reply | play the reply again: down the server, back across the network, up the laptop |
+
+In 3D, a small tag pops up each time a layer adds (`+ TCP 20 B`), removes (`- ETH`) or changes (`TTL 63`, `new FCS`) a
+header; the overview traces the whole route; the cable stop draws the four twisted pairs and why twisting cancels noise.
 
 All bytes are computed: the TLS record lengths, the TCP/UDP checksum, the IP header checksum (recomputed when the
 router changes the TTL from 64 to 63), the Ethernet FCS (CRC-32), and the new MAC addresses on the second hop.
