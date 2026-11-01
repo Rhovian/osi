@@ -80,3 +80,16 @@ Open `osi.html` in a browser (single file, no network). Source: `src/osi.html` +
   switch ASIC/MAC table and router CPU/routing table. **Labels** names them.
 - Fault toggles stay on (button shown dark) until pressed again. Hover a floor for a tooltip (layer, PDU, protocols,
   real devices). Drag to turn the board all the way round; pinch / ctrl-scroll to zoom.
+
+## The Network Journey (`journey.html`) — work in progress
+
+A step-by-step journey that follows one request (`GET /` from a laptop at 10.0.0.20 to `wiki.lan` at 10.0.1.7) down
+the laptop's seven layers, across a cable, switch and router, and up the server's layers. One control: Next / Back
+(arrow keys, or click a stop on the route map). Each stop shows a plain-language summary, the steps that happen, the
+real bytes at that point (click a header block, point at a field to find it in the hex), who does the work in real
+systems, and one "Try it" (edit the path, peek at the ciphertext, replay the TLS handshake, switch TCP/UDP).
+
+Built so far: Start, Laptop L7–L4. Next: L3–L1, the network (cable, switch, router), and the server's way up.
+
+Single file, works offline: `src/journey.html` (stops are plain data in `CONTENT`) + three.js r158 (MIT,
+`src/vendor/`). Rebuild with `python3 src/inline.py src/journey.html journey.html`.
