@@ -119,11 +119,11 @@
   @keyframes ldFloor{0%,100%{transform:scaleX(.08)}40%,60%{transform:scaleX(1)}}
   @media (prefers-reduced-motion:reduce){.ld-floors i{animation:none;transform:none}}
   @media (max-width:860px){
-    .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 45vh minmax(0,1fr) auto}
+    .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 45vh minmax(0,1fr)}
     header{grid-column:1} header span{display:none}
     .chip{font-size:10.5px;left:12px;max-width:calc(100% - 24px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     #panel{border-left:0;border-top:1px solid var(--rule)}
-    #rail{grid-column:1}
+    #rail{display:none}   /* no room on a phone: the stop label in the top-left corner shows where you are */
     #panelBody{padding:14px 16px 8px} .nav{padding:10px 16px 12px}
     h2{font-size:24px} .lead{font-size:16.5px}
   }

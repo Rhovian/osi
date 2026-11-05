@@ -10,7 +10,7 @@ reply. Twenty stops, one step at a time, with the real bytes at every step.
 
 ## Using it
 
-One control: **Next / Back** (or the arrow keys, or click a stop on the route map at the bottom). Drag the picture to
+One control: **Next / Back** (or the arrow keys, or on a larger screen click a stop on the route map at the bottom). Drag the picture to
 look around; double-click to reset the view.
 
 Every stop has the same parts: what the layer does in one sentence, the same step in everyday terms (posting a letter),
